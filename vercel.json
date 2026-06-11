@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run vercel-build",
+  "crons": [
+    {
+      "path": "/api/jobs/update-data",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}

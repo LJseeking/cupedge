@@ -1,0 +1,15 @@
+node_modules
+.next
+.DS_Store
+.prisma-cache
+dist
+coverage
+_snapshots/
+.env
+.env*.local
+!.env.example
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+*.tsbuildinfo

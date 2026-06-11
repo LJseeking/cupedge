@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id                String           @id @default(cuid())
+  name              String
+  slug              String           @unique
+  countryCode       String?
+  group             String?
+  isQualified       Boolean          @default(true)
+  tournament        String           @default("world-cup-2026")
+  seedAiProbability Float?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  bookmakerOdds     BookmakerOdd[]
+  projections       TeamTournamentProjection[]
+  ratings           TeamRating[]
+  snapshots         MarketSnapshot[]
+  valuation         TeamValuation?
+}
+
+model TeamRating {
+  id                 String   @id @default(cuid())
+  teamId             String
+  source             String
+  rating             Float
+  normalizedStrength Float
+  rawJson            String?
+  capturedAt         DateTime @default(now())
+  team               Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, source, capturedAt])
+  @@index([source, capturedAt])
+}
+
+model MarketSnapshot {
+  id                     String   @id @default(cuid())
+  teamId                 String
+  source                 String
+  polymarketProbability  Float?
+  bookmakerProbability   Float?
+  fairProbability        Float?
+  edgeScore              Float?
+  bestBid                Float?
+  bestAsk                Float?
+  spread                 Float?
+  liquidity              Float?
+  volume                 Float?
+  rawJson                String?
+  capturedAt             DateTime @default(now())
+  team                   Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, capturedAt])
+  @@index([source, capturedAt])
+}
+
+model TeamValuation {
+  id                    String   @id @default(cuid())
+  teamId                String   @unique
+  polymarketProbability Float
+  bookmakerProbability  Float?
+  aiProbability         Float?
+  fairProbability       Float
+  edgeScore             Float
+  status                String
+  confidence            String
+  summary               String?
+  updatedAt             DateTime @updatedAt
+  team                  Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([edgeScore])
+  @@index([status])
+}
+
+model BookmakerOdd {
+  id                    String   @id @default(cuid())
+  teamId                String
+  bookmaker             String
+  decimalOdds           Float
+  impliedProbability    Float
+  normalizedProbability Float
+  rawJson               String?
+  capturedAt            DateTime @default(now())
+  team                  Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, capturedAt])
+  @@index([bookmaker, capturedAt])
+}
+
+model TeamTournamentProjection {
+  id                       String   @id @default(cuid())
+  teamId                   String
+  source                   String   @default("QUANT_SIMULATION")
+  strengthSource           String
+  simulations              Int
+  groupWinProbability      Float
+  reachR32Probability      Float
+  reachR16Probability      Float
+  reachQfProbability       Float
+  reachSfProbability       Float
+  reachFinalProbability    Float
+  winTournamentProbability Float
+  rawJson                  String?
+  updatedAt                DateTime @updatedAt
+  createdAt                DateTime @default(now())
+  team                     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, source])
+  @@index([source])
+  @@index([updatedAt])
+}
+
+model MarketOpportunity {
+  id                    String   @id @default(cuid())
+  marketSlug            String
+  marketType            String
+  marketTitle           String
+  outcomeName           String
+  side                  String
+  polymarketProbability Float
+  fairProbability       Float
+  edgeScore             Float
+  actionableScore       Float
+  liquidity             Float?
+  volume24h             Float?
+  priceSource           String   @default("MOCK")
+  volumeSource          String   @default("MOCK")
+  fairValueSource       String   @default("MOCK")
+  dataQuality           String
+  signalStrength        String
+  signalLabel           String
+  explanation           String
+  riskNote              String
+  sourceUrl             String?
+  marketSourceUrl       String?
+  sumYesBuyPrices       Float?
+  basketEdge            Float?
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  @@index([marketType])
+  @@index([marketSlug])
+  @@index([signalStrength])
+  @@index([actionableScore])
+}

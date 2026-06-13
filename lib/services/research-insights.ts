@@ -176,7 +176,7 @@ function buildMarketInsights(
         .map((valuation) => `${valuation.name}: ${valuation.deepseekResearch ?? "No DeepSeek note."}`)
         .join("\n"),
       gptSummary: uniqueValuations
-        .map((valuation) => `${valuation.name}: ${valuation.gptSummary ?? valuation.llmAdjustmentReason ?? "No GPT summary."}`)
+        .map((valuation) => `${valuation.name}: ${valuation.gptSummary ?? valuation.llmAdjustmentReason ?? "No Gemini summary."}`)
         .join("\n"),
       llmAdjustment: median(uniqueValuations.map((valuation) => valuation.llmAdjustment ?? 0)),
       researchSources: mergeSources(uniqueValuations.map((valuation) => valuation.researchSources)),

@@ -16,8 +16,8 @@ export function ResearchInsightPanel({
       : "Waiting for the next update-data run: DeepSeek will extract team news, injuries, results, and schedule factors after Tavily search.");
   const gptBody = insight?.gptSummary ??
     (locale === "zh"
-      ? "等待下一次 update-data：GPT 会在这里总结 DeepSeek 结论，并给出最终概率校准。"
-      : "Waiting for the next update-data run: GPT will summarize DeepSeek findings and provide the final probability calibration.");
+      ? "等待下一次 update-data：Gemini 会在这里总结 DeepSeek 结论，并给出最终概率校准。"
+      : "Waiting for the next update-data run: Gemini will summarize DeepSeek findings and provide the final probability calibration.");
 
   return (
     <section className="mt-6 rounded-lg border border-line bg-panel p-5">
@@ -28,8 +28,8 @@ export function ResearchInsightPanel({
           </h2>
           <p className="mt-2 text-xs leading-5 text-zinc-500">
             {locale === "zh"
-              ? "Tavily 搜索最新信息，DeepSeek 提取影响因子，GPT 进行总结与概率校准。"
-              : "Tavily searches fresh information, DeepSeek extracts impact factors, and GPT summarizes/calibrates."}
+              ? "Tavily 搜索最新信息，DeepSeek 提取影响因子，Gemini 进行总结与概率校准。"
+              : "Tavily searches fresh information, DeepSeek extracts impact factors, and Gemini summarizes/calibrates."}
           </p>
         </div>
         <div className="rounded border border-line bg-zinc-950 px-3 py-2 text-right">
@@ -48,7 +48,7 @@ export function ResearchInsightPanel({
           body={deepseekBody}
         />
         <ResearchBlock
-          title="GPT Summary"
+          title="Gemini Summary"
           body={gptBody}
           sources={insight?.researchSources}
         />

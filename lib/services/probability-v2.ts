@@ -136,8 +136,8 @@ export async function getLlmProbabilityAdjustments(
 
   const maxAdjustment = getMaxLlmAdjustment();
   const researchEnabled = (process.env.LLM_RESEARCH_ENABLED ?? "false").toLowerCase() === "true";
-  if (researchEnabled && process.env.LLM_RESEARCH_PIPELINE === "tavily-deepseek-gpt") {
-    return getTavilyDeepSeekGptAdjustments(inputs, maxAdjustment);
+  if (researchEnabled && isDeepSeekGeminiPipeline()) {
+    return getTavilyDeepSeekGeminiAdjustments(inputs, maxAdjustment);
   }
 
   const provider = normalizeProvider(process.env.LLM_PROVIDER);
@@ -201,15 +201,15 @@ export async function getLlmProbabilityAdjustments(
   return aggregated;
 }
 
-async function getTavilyDeepSeekGptAdjustments(
+async function getTavilyDeepSeekGeminiAdjustments(
   inputs: ProbabilityV2Input[],
   maxAdjustment: number
 ): Promise<Map<string, LlmProbabilityAdjustment>> {
   const tavilyKey = process.env.TAVILY_API_KEY;
   const deepseekKey = process.env.DEEPSEEK_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
-  if (!tavilyKey || !deepseekKey || !openaiKey) {
-    console.warn("Tavily/DeepSeek/GPT research pipeline skipped because one or more API keys are missing.");
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.LLM_SUMMARY_API_KEY;
+  if (!tavilyKey || !deepseekKey || !geminiKey) {
+    console.warn("Tavily/DeepSeek/Gemini research pipeline skipped because one or more API keys are missing.");
     return new Map();
   }
 
@@ -217,26 +217,26 @@ async function getTavilyDeepSeekGptAdjustments(
   if (!searchResults.length) return new Map();
 
   const deepseekResearch = await fetchDeepSeekResearch(inputs, searchResults, deepseekKey);
-  let gptAdjustments: LlmProbabilityAdjustment[] = [];
+  let geminiAdjustments: LlmProbabilityAdjustment[] = [];
   try {
-    gptAdjustments = await fetchGptSummaryAdjustments(
+    geminiAdjustments = await fetchGeminiSummaryAdjustments(
       inputs,
       searchResults,
       deepseekResearch,
-      openaiKey,
+      geminiKey,
       maxAdjustment
     );
   } catch (error) {
-    console.warn("GPT summary adjustment failed. Continuing with DeepSeek-only research.", error);
+    console.warn("Gemini summary adjustment failed. Continuing with DeepSeek-only research.", error);
     return buildDeepSeekOnlyAdjustments(deepseekResearch);
   }
 
-  if (!gptAdjustments.length) {
+  if (!geminiAdjustments.length) {
     return buildDeepSeekOnlyAdjustments(deepseekResearch);
   }
 
   const bySlug = new Map<string, LlmProbabilityAdjustment>();
-  for (const adjustment of gptAdjustments) {
+  for (const adjustment of geminiAdjustments) {
     const research = deepseekResearch.find((item) => item.slug === adjustment.slug);
     bySlug.set(adjustment.slug, {
       ...adjustment,
@@ -257,7 +257,7 @@ function buildDeepSeekOnlyAdjustments(
     bySlug.set(research.slug, {
       slug: research.slug,
       adjustment: 0,
-      reason: "GPT summary unavailable; using DeepSeek research without final probability adjustment.",
+      reason: "Gemini summary unavailable; using DeepSeek research without final probability adjustment.",
       modelCount: 1,
       deepseekResearch: research.deepseekResearch,
       gptSummary: undefined,
@@ -393,14 +393,18 @@ async function fetchDeepSeekResearch(
     .filter(Boolean) as Array<{ slug: string; deepseekResearch?: string; researchSources?: string }>;
 }
 
-async function fetchGptSummaryAdjustments(
+async function fetchGeminiSummaryAdjustments(
   inputs: ProbabilityV2Input[],
   searchResults: TavilySearchResult[],
   deepseekResearch: Array<{ slug: string; deepseekResearch?: string; researchSources?: string }>,
   apiKey: string,
   maxAdjustment: number
 ) {
-  const apiBase = (process.env.OPENAI_API_BASE || process.env.LLM_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "");
+  const apiBase = normalizeOpenAiCompatibleBase(
+    process.env.GEMINI_API_BASE ||
+      process.env.LLM_SUMMARY_API_BASE ||
+      "https://platform.powermatrix.tech"
+  );
   const response = await fetch(`${apiBase}/chat/completions`, {
     method: "POST",
     headers: {
@@ -408,20 +412,19 @@ async function fetchGptSummaryAdjustments(
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: process.env.GPT_SUMMARY_MODEL || process.env.LLM_RESEARCH_MODEL || "gpt-5.5",
+      model: process.env.GEMINI_SUMMARY_MODEL || process.env.LLM_SUMMARY_MODEL || "gemini-2.5-flash",
       temperature: 0.1,
-      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
           content:
-            "You are the final football forecasting calibration reviewer. Use DeepSeek research plus source snippets to summarize and set a tiny bounded adjustment. Do not invent sources. Return strict JSON."
+            "You are Gemini, the final football forecasting calibration reviewer. Use DeepSeek research plus source snippets to summarize and set a tiny bounded adjustment. Do not invent sources. Return strict JSON."
         },
         {
           role: "user",
           content: JSON.stringify({
             task:
-              "Review DeepSeek's team research and the original search snippets. Produce final bounded adjustments and a concise GPT summary for display.",
+              "Review DeepSeek's team research and the original search snippets. Produce final bounded adjustments and a concise Gemini summary for display.",
             maxAdjustment,
             teams: inputs,
             deepseekResearch,
@@ -437,7 +440,7 @@ async function fetchGptSummaryAdjustments(
                   slug: "team-slug",
                   adjustment: 0,
                   reason: "final short reason",
-                  gptSummary: "display summary",
+                  gptSummary: "display summary from Gemini",
                   sources: ["https://example.com/source"]
                 }
               ]
@@ -452,12 +455,12 @@ async function fetchGptSummaryAdjustments(
         }
       ]
     }),
-    signal: AbortSignal.timeout(Number(process.env.GPT_SUMMARY_TIMEOUT_MS ?? "90000"))
+    signal: AbortSignal.timeout(Number(process.env.GEMINI_SUMMARY_TIMEOUT_MS ?? "90000"))
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`GPT summary adjustment returned ${response.status}: ${body.slice(0, 500)}`);
+    throw new Error(`Gemini summary adjustment returned ${response.status}: ${body.slice(0, 500)}`);
   }
 
   const data = (await response.json()) as ChatCompletionResponse;
@@ -762,7 +765,7 @@ function getProviderApiKey(provider: "openai" | "anthropic") {
   if (provider === "anthropic") {
     return process.env.ANTHROPIC_API_KEY || process.env.LLM_API_KEY;
   }
-  return process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
+  return process.env.LLM_API_KEY;
 }
 
 function getConfiguredModels(provider: "openai" | "anthropic") {
@@ -770,8 +773,26 @@ function getConfiguredModels(provider: "openai" | "anthropic") {
   if (researchEnabled && process.env.LLM_RESEARCH_MODEL) return [process.env.LLM_RESEARCH_MODEL];
   const models = parseList(process.env.LLM_MODELS);
   if (models.length) return models;
-  if (provider === "anthropic") return process.env.LLM_RESEARCH_ENABLED === "true" ? ["claude-sonnet-4-5"] : [];
-  return process.env.LLM_RESEARCH_ENABLED === "true" ? ["gpt-5.5"] : [];
+  if (provider === "anthropic") return [];
+  return [];
+}
+
+function isDeepSeekGeminiPipeline() {
+  return process.env.LLM_RESEARCH_PIPELINE === "tavily-deepseek-gemini";
+}
+
+function normalizeOpenAiCompatibleBase(value: string) {
+  const trimmed = value.replace(/\/$/, "");
+  try {
+    const url = new URL(trimmed);
+    if (!url.pathname || url.pathname === "/") {
+      url.pathname = "/v1";
+      return url.toString().replace(/\/$/, "");
+    }
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 function extractOpenAIResponseText(data: OpenAIResponsesResponse) {

@@ -344,7 +344,7 @@ function UpcomingMatchCard({
             {match.deepseekResearch ?? (locale === "zh" ? "暂无摘要。" : "No summary yet.")}
           </p>
           <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
-            <span className="font-mono text-zinc-300">GPT</span>
+            <span className="font-mono text-zinc-300">Gemini</span>
             <br />
             {match.gptSummary ?? (locale === "zh" ? "暂无总结。" : "No summary yet.")}
           </p>

@@ -102,13 +102,17 @@ LLM_RESEARCH_PIPELINE=""
 LLM_PROVIDER="openai"
 LLM_API_BASE="https://api.openai.com/v1"
 LLM_API_KEY=""
-OPENAI_API_KEY=""
 ANTHROPIC_API_KEY=""
 TAVILY_API_KEY=""
 DEEPSEEK_API_KEY=""
 DEEPSEEK_API_BASE="https://api.deepseek.com"
 DEEPSEEK_MODEL="deepseek-chat"
-GPT_SUMMARY_MODEL=""
+GEMINI_API_KEY=""
+GEMINI_API_BASE="https://platform.powermatrix.tech"
+GEMINI_SUMMARY_MODEL="gemini-2.5-flash"
+LLM_SUMMARY_API_KEY=""
+LLM_SUMMARY_API_BASE=""
+LLM_SUMMARY_MODEL=""
 LLM_MODELS=""
 LLM_RESEARCH_MODEL=""
 LLM_RESEARCH_SEARCH_CONTEXT_SIZE="medium"
@@ -124,7 +128,7 @@ LLM_ADJUSTMENT_TIMEOUT_MS="25000"
 LLM_RESEARCH_TIMEOUT_MS="90000"
 RESEARCH_SEARCH_TIMEOUT_MS="30000"
 DEEPSEEK_RESEARCH_TIMEOUT_MS="90000"
-GPT_SUMMARY_TIMEOUT_MS="90000"
+GEMINI_SUMMARY_TIMEOUT_MS="90000"
 ```
 
 `THE_ODDS_API_KEY` is optional. Without it, CupEdge uses the latest database bookmaker odds first. If none exist, it uses mock bookmaker data and does not call The Odds API.
@@ -157,7 +161,7 @@ Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the sc
 
 CupEdge Probability v2 blends market consensus, quant simulation, and an optional bounded LLM adjustment. LLM adjustment is off by default. To enable non-search adjustment, set `LLM_ADJUSTMENT_ENABLED="true"`, provide `LLM_API_KEY`, and set `LLM_MODELS` to a comma-separated list of chat-completion model names. To make the model search fresh web information during each update, also set `LLM_RESEARCH_ENABLED="true"` and choose `LLM_PROVIDER="openai"` or `LLM_PROVIDER="anthropic"`.
 
-For the low-cost research pipeline, set `LLM_RESEARCH_PIPELINE="tavily-deepseek-gpt"`. Tavily performs web search, DeepSeek extracts team-specific research notes, and GPT produces the final display summary plus bounded probability adjustment. Each model can only suggest a small calibration delta, capped by `LLM_ADJUSTMENT_MAX_ABS` and defaulting to +/-3 percentage points.
+For the low-cost research pipeline, set `LLM_RESEARCH_PIPELINE="tavily-deepseek-gemini"`. Tavily performs web search, DeepSeek extracts team-specific research notes, and Gemini produces the final display summary plus bounded probability adjustment. Each model can only suggest a small calibration delta, capped by `LLM_ADJUSTMENT_MAX_ABS` and defaulting to +/-3 percentage points.
 
 The Odds API requires `THE_ODDS_API_KEY`. Polymarket market data does not require an API key.
 
@@ -326,13 +330,17 @@ LLM_RESEARCH_PIPELINE=""
 LLM_PROVIDER="openai"
 LLM_API_BASE="https://api.openai.com/v1"
 LLM_API_KEY=""
-OPENAI_API_KEY=""
 ANTHROPIC_API_KEY=""
 TAVILY_API_KEY=""
 DEEPSEEK_API_KEY=""
 DEEPSEEK_API_BASE="https://api.deepseek.com"
 DEEPSEEK_MODEL="deepseek-chat"
-GPT_SUMMARY_MODEL=""
+GEMINI_API_KEY=""
+GEMINI_API_BASE="https://platform.powermatrix.tech"
+GEMINI_SUMMARY_MODEL="gemini-2.5-flash"
+LLM_SUMMARY_API_KEY=""
+LLM_SUMMARY_API_BASE=""
+LLM_SUMMARY_MODEL=""
 LLM_MODELS=""
 LLM_RESEARCH_MODEL=""
 LLM_RESEARCH_SEARCH_CONTEXT_SIZE="medium"
@@ -348,7 +356,7 @@ LLM_ADJUSTMENT_TIMEOUT_MS="25000"
 LLM_RESEARCH_TIMEOUT_MS="90000"
 RESEARCH_SEARCH_TIMEOUT_MS="30000"
 DEEPSEEK_RESEARCH_TIMEOUT_MS="90000"
-GPT_SUMMARY_TIMEOUT_MS="90000"
+GEMINI_SUMMARY_TIMEOUT_MS="90000"
 ```
 
 ### 3. Initialize the production database

@@ -217,13 +217,23 @@ async function getTavilyDeepSeekGptAdjustments(
   if (!searchResults.length) return new Map();
 
   const deepseekResearch = await fetchDeepSeekResearch(inputs, searchResults, deepseekKey);
-  const gptAdjustments = await fetchGptSummaryAdjustments(
-    inputs,
-    searchResults,
-    deepseekResearch,
-    openaiKey,
-    maxAdjustment
-  );
+  let gptAdjustments: LlmProbabilityAdjustment[] = [];
+  try {
+    gptAdjustments = await fetchGptSummaryAdjustments(
+      inputs,
+      searchResults,
+      deepseekResearch,
+      openaiKey,
+      maxAdjustment
+    );
+  } catch (error) {
+    console.warn("GPT summary adjustment failed. Continuing with DeepSeek-only research.", error);
+    return buildDeepSeekOnlyAdjustments(deepseekResearch);
+  }
+
+  if (!gptAdjustments.length) {
+    return buildDeepSeekOnlyAdjustments(deepseekResearch);
+  }
 
   const bySlug = new Map<string, LlmProbabilityAdjustment>();
   for (const adjustment of gptAdjustments) {
@@ -234,6 +244,24 @@ async function getTavilyDeepSeekGptAdjustments(
       deepseekResearch: research?.deepseekResearch,
       gptSummary: adjustment.gptSummary ?? adjustment.reason,
       researchSources: adjustment.researchSources ?? research?.researchSources
+    });
+  }
+  return bySlug;
+}
+
+function buildDeepSeekOnlyAdjustments(
+  deepseekResearch: Array<{ slug: string; deepseekResearch?: string; researchSources?: string }>
+) {
+  const bySlug = new Map<string, LlmProbabilityAdjustment>();
+  for (const research of deepseekResearch) {
+    bySlug.set(research.slug, {
+      slug: research.slug,
+      adjustment: 0,
+      reason: "GPT summary unavailable; using DeepSeek research without final probability adjustment.",
+      modelCount: 1,
+      deepseekResearch: research.deepseekResearch,
+      gptSummary: undefined,
+      researchSources: research.researchSources
     });
   }
   return bySlug;

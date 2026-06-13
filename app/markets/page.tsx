@@ -311,7 +311,9 @@ function getSourceStatus(markets: Awaited<ReturnType<typeof getMarketSummaries>>
     prices: allPriceLive ? "Live" : anyPriceLive ? "Mixed" : "Mock",
     volume: allVolumeLive ? "Live" : anyVolumeLive ? "Mixed" : "Mock",
     fairValue:
-      fairValueSources.size === 1 && (fairValueSources.has("MODEL") || fairValueSources.has("RATING_MODEL") || fairValueSources.has("QUANT_MODEL"))
+      fairValueSources.size === 1 && fairValueSources.has("CUPEDGE_V2")
+        ? "CupEdge v2"
+        : fairValueSources.size === 1 && (fairValueSources.has("MODEL") || fairValueSources.has("RATING_MODEL") || fairValueSources.has("QUANT_MODEL"))
         ? "Model"
         : fairValueSources.size === 1 && fairValueSources.has("RATING_FALLBACK")
           ? "Rating Fallback"
@@ -374,7 +376,12 @@ function marketTierText(market: MarketSummary, locale: "zh" | "en") {
   if (
     market.priceSource === "LIVE_POLYMARKET" &&
     market.volumeSource === "LIVE_POLYMARKET" &&
-    (market.fairValueSource === "MODEL" || market.fairValueSource === "RATING_MODEL" || market.fairValueSource === "QUANT_MODEL")
+    (
+      market.fairValueSource === "CUPEDGE_V2" ||
+      market.fairValueSource === "MODEL" ||
+      market.fairValueSource === "RATING_MODEL" ||
+      market.fairValueSource === "QUANT_MODEL"
+    )
   ) {
     return market.marketType === "WINNER"
       ? "Live Verified"

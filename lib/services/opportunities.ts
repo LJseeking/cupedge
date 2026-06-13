@@ -4,6 +4,7 @@ import { QUALIFIED_TEAMS } from "@/lib/data/qualified-teams";
 import { findSeedTeamByName, findSeedTeamInText } from "@/lib/data/teams";
 import { getTeamStrengthMap } from "@/lib/services/ratings";
 import { getTournamentProjectionMap } from "@/lib/services/tournament-simulation";
+import { getCurrentTeamProbabilityV2Map } from "@/lib/services/valuation";
 import type {
   ExecutionStatus,
   MarketOpportunity,
@@ -194,11 +195,12 @@ export async function refreshMarketOpportunities(options: RefreshMarketOpportuni
 export async function getPolymarketMarketOpportunities(): Promise<MarketOpportunity[]> {
   try {
     const markets = await fetchWorldCupMarketsFromGamma();
-    const [strengths, projections] = await Promise.all([
+    const [strengths, projections, probabilityV2Map] = await Promise.all([
       getTeamStrengthMap(),
-      getTournamentProjectionMap()
+      getTournamentProjectionMap(),
+      getCurrentTeamProbabilityV2Map()
     ]);
-    const live = buildLiveOpportunities(markets, strengths, projections);
+    const live = buildLiveOpportunities(markets, strengths, projections, probabilityV2Map);
     if (process.env.CUPEDGE_POLYMARKET_DEBUG === "1") {
       console.log(`[CupEdge] Polymarket raw markets: ${markets.length}, parsed opportunities: ${live.length}`);
       const byTitle = new Map<string, number>();
@@ -542,7 +544,8 @@ async function fetchGammaUrl(url: string, context: string) {
 function buildLiveOpportunities(
   markets: GammaMarket[],
   strengths: Map<string, TeamStrength>,
-  projections: Map<string, TeamTournamentProjection>
+  projections: Map<string, TeamTournamentProjection>,
+  probabilityV2Map: Map<string, { fairProbability: number }>
 ) {
   const updatedAt = new Date();
   const opportunities: MarketOpportunity[] = [];
@@ -574,7 +577,8 @@ function buildLiveOpportunities(
           liquidity,
           marketSourceUrl,
           strengths,
-          projections
+          projections,
+          probabilityV2Map
         });
         if (raw) opportunities.push(buildOpportunity(raw, updatedAt));
       });
@@ -593,7 +597,8 @@ function buildLiveOpportunities(
         liquidity,
         marketSourceUrl,
         strengths,
-        projections
+        projections,
+        probabilityV2Map
       });
       if (raw) opportunities.push(buildOpportunity(raw, updatedAt));
     }
@@ -610,7 +615,8 @@ function buildLiveRawOpportunity({
   liquidity,
   marketSourceUrl,
   strengths,
-  projections
+  projections,
+  probabilityV2Map
 }: {
   marketType: MarketType;
   marketTitle: string;
@@ -621,6 +627,7 @@ function buildLiveRawOpportunity({
   marketSourceUrl?: string;
   strengths: Map<string, TeamStrength>;
   projections: Map<string, TeamTournamentProjection>;
+  probabilityV2Map: Map<string, { fairProbability: number }>;
 }): RawOpportunity | null {
   const mockMatch = rawOpportunities.find(
     (item) =>
@@ -637,7 +644,8 @@ function buildLiveRawOpportunity({
     seedTeam,
     mockMatch,
     strengths,
-    projections
+    projections,
+    probabilityV2Map
   });
   if (!fair) return null;
   const dataQuality: Confidence =
@@ -687,7 +695,8 @@ function deriveLiveFairProbability({
   seedTeam,
   mockMatch,
   strengths,
-  projections
+  projections,
+  probabilityV2Map
 }: {
   marketType: MarketType;
   marketTitle: string;
@@ -697,12 +706,21 @@ function deriveLiveFairProbability({
   mockMatch?: RawOpportunity;
   strengths: Map<string, TeamStrength>;
   projections: Map<string, TeamTournamentProjection>;
+  probabilityV2Map: Map<string, { fairProbability: number }>;
 }): { probability: number; source: FairValueSource; ratingSource?: TeamStrength["source"] } | null {
   if (!seedTeam && isTeamMarketType(marketType)) return null;
 
   const teamStrength = seedTeam ? strengths.get(seedTeam.slug) : undefined;
   const projection = seedTeam ? projections.get(seedTeam.slug) : undefined;
   if (seedTeam && marketType === "WINNER") {
+    const probabilityV2 = probabilityV2Map.get(seedTeam.slug);
+    if (probabilityV2) {
+      return {
+        probability: probabilityV2.fairProbability,
+        source: "CUPEDGE_V2",
+        ratingSource: teamStrength?.source
+      };
+    }
     if (projection) {
       return {
         probability: projection.winTournamentProbability,

@@ -14,6 +14,7 @@ export type PriceSource = "LIVE_POLYMARKET" | "MOCK";
 export type VolumeSource = "LIVE_POLYMARKET" | "MOCK";
 export type FairValueSource =
   | "BOOKMAKER"
+  | "CUPEDGE_V2"
   | "MODEL"
   | "QUANT_MODEL"
   | "RATING_MODEL"

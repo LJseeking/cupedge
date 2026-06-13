@@ -60,6 +60,15 @@ export type ValuationRow = {
   polymarketProbability: number;
   bookmakerProbability?: number | null;
   aiProbability?: number | null;
+  marketConsensusProbability?: number | null;
+  quantProbability?: number | null;
+  llmAdjustment?: number | null;
+  llmAdjustmentReason?: string | null;
+  llmModelCount?: number | null;
+  deepseekResearch?: string | null;
+  gptSummary?: string | null;
+  researchSources?: string | null;
+  probabilityModelVersion?: string | null;
   fairProbability: number;
   edgeScore: number;
   status: TeamStatus;

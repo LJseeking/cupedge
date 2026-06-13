@@ -17,6 +17,7 @@ export function getOpportunityTrustTier(opportunity: MarketOpportunity): Opportu
     opportunity.volumeSource === "LIVE_POLYMARKET";
   const hasUsableFairValue =
     opportunity.fairValueSource === "BOOKMAKER" ||
+    opportunity.fairValueSource === "CUPEDGE_V2" ||
     opportunity.fairValueSource === "MODEL" ||
     opportunity.fairValueSource === "QUANT_MODEL" ||
     opportunity.fairValueSource === "RATING_MODEL";
@@ -25,7 +26,11 @@ export function getOpportunityTrustTier(opportunity: MarketOpportunity): Opportu
     return "DEMO_NEEDS_VERIFICATION";
   }
 
-  if (opportunity.marketType === "WINNER" || opportunity.fairValueSource === "BOOKMAKER") {
+  if (
+    opportunity.marketType === "WINNER" ||
+    opportunity.fairValueSource === "BOOKMAKER" ||
+    opportunity.fairValueSource === "CUPEDGE_V2"
+  ) {
     return "LIVE_VERIFIED";
   }
 

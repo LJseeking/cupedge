@@ -19,21 +19,27 @@ async function main() {
   }
 
   const { prisma } = await import("../lib/db/prisma");
+  const { refreshMatchResults } = await import("../lib/services/match-results");
   const { refreshMarketOpportunities } = await import("../lib/services/opportunities");
   const { refreshTeamRatings } = await import("../lib/services/ratings");
+  const { refreshResearchInsights } = await import("../lib/services/research-insights");
   const { refreshTournamentProjections } = await import("../lib/services/tournament-simulation");
+  const { refreshUpcomingMatches } = await import("../lib/services/upcoming-matches");
   const { ensureSeedTeams, updateValuations } = await import("../lib/services/valuation");
 
   await ensureSeedTeams();
   const ratings = await refreshTeamRatings(forceOddsRefresh);
+  const matchResults = await refreshMatchResults();
   const projections = await refreshTournamentProjections();
   const valuations = await updateValuations({ forceMock, forceOddsRefresh });
   const opportunities = await refreshMarketOpportunities({ forceMock });
+  const researchInsights = await refreshResearchInsights({ valuations, opportunities });
+  const upcomingMatches = await refreshUpcomingMatches();
   const sourceCounts = await prisma.marketOpportunity.groupBy({
     by: ["priceSource", "volumeSource", "fairValueSource"],
     _count: true
   });
-  console.log(`Updated ${valuations.length} team valuations, ${ratings.size} team ratings, ${projections.length} tournament projections, and ${opportunities.length} market opportunities.`);
+  console.log(`Updated ${valuations.length} team valuations, ${ratings.size} team ratings, ${matchResults.length} match results, ${projections.length} tournament projections, ${opportunities.length} market opportunities, ${researchInsights} research insights, and ${upcomingMatches.length} upcoming matches.`);
   console.log(`[CupEdge] Market opportunity source counts: ${JSON.stringify(sourceCounts)}`);
 
   await prisma.$disconnect();

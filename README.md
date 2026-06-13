@@ -85,6 +85,46 @@ ELO_RATINGS_URL="https://www.international-football.net/"
 SPI_RATINGS_URL="https://projects.fivethirtyeight.com/soccer-api/international/spi_global_rankings_intl.csv"
 RATINGS_UPDATE_MIN_INTERVAL_HOURS="24"
 TOURNAMENT_SIMULATIONS="10000"
+UPCOMING_MATCH_SLUGS="fifwc-qat-che-2026-06-13"
+MANUAL_MATCH_RESULTS=""
+MATCH_RESULTS_JSON=""
+MATCH_RESULT_SEARCH_QUERIES=""
+MATCH_RESULT_SEARCH_MAX_RESULTS="5"
+MATCH_RESULT_SEARCH_TOTAL_MAX_RESULTS="12"
+MATCH_RESULT_SEARCH_TOPIC="news"
+MATCH_RESULT_SEARCH_DEPTH="basic"
+MATCH_RESULT_SEARCH_TIMEOUT_MS="30000"
+MATCH_RESULT_LLM_TIMEOUT_MS="45000"
+MATCH_RESULT_DEEPSEEK_MODEL=""
+LLM_ADJUSTMENT_ENABLED="false"
+LLM_RESEARCH_ENABLED="false"
+LLM_RESEARCH_PIPELINE=""
+LLM_PROVIDER="openai"
+LLM_API_BASE="https://api.openai.com/v1"
+LLM_API_KEY=""
+OPENAI_API_KEY=""
+ANTHROPIC_API_KEY=""
+TAVILY_API_KEY=""
+DEEPSEEK_API_KEY=""
+DEEPSEEK_API_BASE="https://api.deepseek.com"
+DEEPSEEK_MODEL="deepseek-chat"
+GPT_SUMMARY_MODEL=""
+LLM_MODELS=""
+LLM_RESEARCH_MODEL=""
+LLM_RESEARCH_SEARCH_CONTEXT_SIZE="medium"
+LLM_RESEARCH_MAX_SEARCHES="20"
+RESEARCH_SEARCH_PROVIDER="tavily"
+RESEARCH_SEARCH_QUERIES_PER_UPDATE="4"
+RESEARCH_SEARCH_MAX_RESULTS="5"
+RESEARCH_SEARCH_TOTAL_MAX_RESULTS="20"
+RESEARCH_SEARCH_TOPIC="news"
+RESEARCH_SEARCH_DEPTH="basic"
+LLM_ADJUSTMENT_MAX_ABS="0.03"
+LLM_ADJUSTMENT_TIMEOUT_MS="25000"
+LLM_RESEARCH_TIMEOUT_MS="90000"
+RESEARCH_SEARCH_TIMEOUT_MS="30000"
+DEEPSEEK_RESEARCH_TIMEOUT_MS="90000"
+GPT_SUMMARY_TIMEOUT_MS="90000"
 ```
 
 `THE_ODDS_API_KEY` is optional. Without it, CupEdge uses the latest database bookmaker odds first. If none exist, it uses mock bookmaker data and does not call The Odds API.
@@ -108,6 +148,16 @@ Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the sc
 `RATINGS_UPDATE_MIN_INTERVAL_HOURS` controls how often ratings are refreshed. Pages never call Elo/SPI sources directly; ratings refresh only during `npm run update:data`, `npm run update:ratings`, or the update job route.
 
 `TOURNAMENT_SIMULATIONS` controls the Monte Carlo tournament simulation count. CupEdge uses this quant model as the fair-probability anchor for winner, group winner, reach R16, reach QF, and reach SF markets.
+
+`UPCOMING_MATCH_SLUGS` is a comma-separated list of Polymarket World Cup match slugs to show on the homepage upcoming-match panel. Example: `fifwc-qat-che-2026-06-13`.
+
+`MANUAL_MATCH_RESULTS` lets you force known completed results into the simulation while search catches up. Format: `United States 4-1 Paraguay @ 2026-06-12`. Multiple results can be separated by commas or new lines. `MATCH_RESULTS_JSON` accepts an array of `{ homeTeam, awayTeam, homeScore, awayScore, playedAt }` objects. During each update, CupEdge stores match results first, then reruns the tournament simulation with those known results applied to group standings before simulating remaining fixtures.
+
+`MATCH_RESULT_SEARCH_*` configures the Tavily + DeepSeek result parser. Tavily searches for completed 2026 World Cup scores, DeepSeek extracts conservative structured match results, and only explicit scores between qualified teams in the same group are admitted.
+
+CupEdge Probability v2 blends market consensus, quant simulation, and an optional bounded LLM adjustment. LLM adjustment is off by default. To enable non-search adjustment, set `LLM_ADJUSTMENT_ENABLED="true"`, provide `LLM_API_KEY`, and set `LLM_MODELS` to a comma-separated list of chat-completion model names. To make the model search fresh web information during each update, also set `LLM_RESEARCH_ENABLED="true"` and choose `LLM_PROVIDER="openai"` or `LLM_PROVIDER="anthropic"`.
+
+For the low-cost research pipeline, set `LLM_RESEARCH_PIPELINE="tavily-deepseek-gpt"`. Tavily performs web search, DeepSeek extracts team-specific research notes, and GPT produces the final display summary plus bounded probability adjustment. Each model can only suggest a small calibration delta, capped by `LLM_ADJUSTMENT_MAX_ABS` and defaulting to +/-3 percentage points.
 
 The Odds API requires `THE_ODDS_API_KEY`. Polymarket market data does not require an API key.
 
@@ -205,8 +255,12 @@ The Odds API:
 Fair probability:
 
 ```text
-fair_probability = bookmaker_probability * 0.7 + simple_ai_probability * 0.3
-edge_score = fair_probability - polymarket_probability
+fair_probability_v2 = weighted_available_average(
+  bookmaker_probability * 0.45,
+  polymarket_probability * 0.25,
+  quant_simulation_probability * 0.30
+) + bounded_llm_adjustment
+edge_score = fair_probability_v2 - polymarket_probability
 ```
 
 ## Production Launch: Vercel + PostgreSQL
@@ -255,6 +309,46 @@ ELO_RATINGS_URL="https://www.international-football.net/"
 SPI_RATINGS_URL="https://projects.fivethirtyeight.com/soccer-api/international/spi_global_rankings_intl.csv"
 RATINGS_UPDATE_MIN_INTERVAL_HOURS="24"
 TOURNAMENT_SIMULATIONS="10000"
+UPCOMING_MATCH_SLUGS="fifwc-qat-che-2026-06-13"
+MANUAL_MATCH_RESULTS=""
+MATCH_RESULTS_JSON=""
+MATCH_RESULT_SEARCH_QUERIES=""
+MATCH_RESULT_SEARCH_MAX_RESULTS="5"
+MATCH_RESULT_SEARCH_TOTAL_MAX_RESULTS="12"
+MATCH_RESULT_SEARCH_TOPIC="news"
+MATCH_RESULT_SEARCH_DEPTH="basic"
+MATCH_RESULT_SEARCH_TIMEOUT_MS="30000"
+MATCH_RESULT_LLM_TIMEOUT_MS="45000"
+MATCH_RESULT_DEEPSEEK_MODEL=""
+LLM_ADJUSTMENT_ENABLED="false"
+LLM_RESEARCH_ENABLED="false"
+LLM_RESEARCH_PIPELINE=""
+LLM_PROVIDER="openai"
+LLM_API_BASE="https://api.openai.com/v1"
+LLM_API_KEY=""
+OPENAI_API_KEY=""
+ANTHROPIC_API_KEY=""
+TAVILY_API_KEY=""
+DEEPSEEK_API_KEY=""
+DEEPSEEK_API_BASE="https://api.deepseek.com"
+DEEPSEEK_MODEL="deepseek-chat"
+GPT_SUMMARY_MODEL=""
+LLM_MODELS=""
+LLM_RESEARCH_MODEL=""
+LLM_RESEARCH_SEARCH_CONTEXT_SIZE="medium"
+LLM_RESEARCH_MAX_SEARCHES="20"
+RESEARCH_SEARCH_PROVIDER="tavily"
+RESEARCH_SEARCH_QUERIES_PER_UPDATE="4"
+RESEARCH_SEARCH_MAX_RESULTS="5"
+RESEARCH_SEARCH_TOTAL_MAX_RESULTS="20"
+RESEARCH_SEARCH_TOPIC="news"
+RESEARCH_SEARCH_DEPTH="basic"
+LLM_ADJUSTMENT_MAX_ABS="0.03"
+LLM_ADJUSTMENT_TIMEOUT_MS="25000"
+LLM_RESEARCH_TIMEOUT_MS="90000"
+RESEARCH_SEARCH_TIMEOUT_MS="30000"
+DEEPSEEK_RESEARCH_TIMEOUT_MS="90000"
+GPT_SUMMARY_TIMEOUT_MS="90000"
 ```
 
 ### 3. Initialize the production database

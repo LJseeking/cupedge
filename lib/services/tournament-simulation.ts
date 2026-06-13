@@ -1,8 +1,10 @@
 import { QUALIFIED_TEAMS } from "@/lib/data/qualified-teams";
 import { prisma } from "@/lib/db/prisma";
+import { getCurrentMatchResults } from "@/lib/services/match-results";
 import { getTeamStrengthMap } from "@/lib/services/ratings";
 import type { TeamTournamentProjection, ProjectionStrengthSource } from "@/lib/types/projection";
 import type { TeamStrength } from "@/lib/types/ratings";
+import type { MatchResult } from "@/lib/types/research";
 import { clampProbability } from "@/lib/utils";
 
 const DEFAULT_SIMULATIONS = 10_000;
@@ -35,8 +37,11 @@ type Counters = {
 
 export async function refreshTournamentProjections(options: { simulations?: number } = {}) {
   const simulations = normalizeSimulationCount(options.simulations);
-  const strengths = await getTeamStrengthMap();
-  const projections = runTournamentSimulation(strengths, simulations);
+  const [strengths, matchResults] = await Promise.all([
+    getTeamStrengthMap(),
+    getCurrentMatchResults()
+  ]);
+  const projections = runTournamentSimulation(strengths, simulations, matchResults);
   const teams = await prisma.team.findMany({
     where: {
       slug: { in: QUALIFIED_TEAMS.map((team) => team.slug) },
@@ -118,7 +123,8 @@ export async function getTournamentProjectionMap() {
 
 export function runTournamentSimulation(
   strengths: Map<string, TeamStrength>,
-  simulations = DEFAULT_SIMULATIONS
+  simulations = DEFAULT_SIMULATIONS,
+  matchResults: MatchResult[] = []
 ): TeamTournamentProjection[] {
   const simCount = normalizeSimulationCount(simulations);
   const teams = QUALIFIED_TEAMS.map((team) => {
@@ -138,7 +144,7 @@ export function runTournamentSimulation(
   const rng = seededRandom(20260609);
 
   for (let index = 0; index < simCount; index += 1) {
-    const groupResults = simulateGroups(teams, rng);
+    const groupResults = simulateGroups(teams, rng, matchResults);
     const bracket = buildRoundOf32Bracket(groupResults, bySlug, rng);
     for (const team of bracket) counters.get(team.slug)!.reachR32 += 1;
 
@@ -179,17 +185,25 @@ export function runTournamentSimulation(
       winTournamentProbability: counts.winTournament / simCount,
       rawJson: {
         model: "elo_seed_monte_carlo_v1",
-        note: "Approximate 2026 tournament simulation using ratings, group round robins, best third-place teams, and deterministic knockout slots."
+        knownResults: matchResults.map((result) => ({
+          homeTeam: result.homeTeam,
+          awayTeam: result.awayTeam,
+          score: `${result.homeScore}-${result.awayScore}`,
+          playedAt: result.playedAt,
+          confidence: result.confidence
+        })),
+        note: "Approximate 2026 tournament simulation using ratings, known group-stage results, simulated remaining group round robins, best third-place teams, and deterministic knockout slots."
       }
     };
   });
 }
 
-function simulateGroups(teams: SimTeam[], rng: () => number) {
+function simulateGroups(teams: SimTeam[], rng: () => number, matchResults: MatchResult[]) {
   const byGroup = new Map<string, SimTeam[]>();
   for (const team of teams) {
     byGroup.set(team.group, [...(byGroup.get(team.group) ?? []), team]);
   }
+  const resultByPair = buildResultPairMap(matchResults);
 
   const winners: SimTeam[] = [];
   const runnersUp: SimTeam[] = [];
@@ -206,7 +220,14 @@ function simulateGroups(teams: SimTeam[], rng: () => number) {
 
     for (let i = 0; i < groupTeams.length; i += 1) {
       for (let j = i + 1; j < groupTeams.length; j += 1) {
-        applyGroupMatch(standingBySlug.get(groupTeams[i].slug)!, standingBySlug.get(groupTeams[j].slug)!, rng);
+        const a = standingBySlug.get(groupTeams[i].slug)!;
+        const b = standingBySlug.get(groupTeams[j].slug)!;
+        const knownResult = resultByPair.get(pairKey(a.slug, b.slug));
+        if (knownResult) {
+          applyKnownGroupMatch(a, b, knownResult);
+        } else {
+          applyGroupMatch(a, b, rng);
+        }
       }
     }
 
@@ -222,6 +243,25 @@ function simulateGroups(teams: SimTeam[], rng: () => number) {
     runnersUp,
     bestThirds: thirds.slice(0, 8)
   };
+}
+
+function applyKnownGroupMatch(a: Standing, b: Standing, result: MatchResult) {
+  const aIsHome = result.homeTeamSlug === a.slug;
+  const aGoals = aIsHome ? result.homeScore : result.awayScore;
+  const bGoals = aIsHome ? result.awayScore : result.homeScore;
+  a.goalsFor += aGoals;
+  b.goalsFor += bGoals;
+  a.goalDiff += aGoals - bGoals;
+  b.goalDiff += bGoals - aGoals;
+
+  if (aGoals > bGoals) {
+    a.points += 3;
+  } else if (bGoals > aGoals) {
+    b.points += 3;
+  } else {
+    a.points += 1;
+    b.points += 1;
+  }
 }
 
 function buildRoundOf32Bracket(
@@ -309,6 +349,19 @@ function compareStandings(a: Standing, b: Standing) {
 
 function byGroupLetter(teams: SimTeam[]) {
   return new Map(teams.map((team) => [team.group.replace("Group ", ""), team]));
+}
+
+function buildResultPairMap(results: MatchResult[]) {
+  const byPair = new Map<string, MatchResult>();
+  for (const result of results) {
+    if (!Number.isFinite(result.homeScore) || !Number.isFinite(result.awayScore)) continue;
+    byPair.set(pairKey(result.homeTeamSlug, result.awayTeamSlug), result);
+  }
+  return byPair;
+}
+
+function pairKey(a: string, b: string) {
+  return [a, b].sort().join(":");
 }
 
 function winProbability(aRating: number, bRating: number) {

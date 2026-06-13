@@ -233,6 +233,8 @@ function sourceText(opportunity: MarketOpportunity, locale: Locale) {
   const fair =
     opportunity.fairValueSource === "BOOKMAKER"
       ? "Bookmaker"
+      : opportunity.fairValueSource === "CUPEDGE_V2"
+        ? "CupEdge v2"
       : opportunity.fairValueSource === "MODEL"
         ? "CupEdge Model"
         : opportunity.fairValueSource === "QUANT_MODEL"

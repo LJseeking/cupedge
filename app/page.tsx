@@ -13,7 +13,9 @@ import {
   trustTierClasses,
   trustTierText
 } from "@/lib/services/opportunity-trust";
+import { getUpcomingMatches } from "@/lib/services/upcoming-matches";
 import type { MarketOpportunity } from "@/lib/types/opportunity";
+import type { UpcomingMatch } from "@/lib/types/research";
 import { percent, signedPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -21,26 +23,36 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const locale = await getLocale();
   const t = getDictionary(locale);
-  const opportunities = await getMarketOpportunities();
+  const [opportunities, upcomingMatches] = await Promise.all([
+    getMarketOpportunities(),
+    getUpcomingMatches(4)
+  ]);
   const liveVerified = opportunities.filter((item) => getOpportunityTrustTier(item) === "LIVE_VERIFIED");
   const modelWatchlist = opportunities.filter((item) => getOpportunityTrustTier(item) === "MODEL_WATCHLIST");
   const demoSignals = opportunities.filter((item) => getOpportunityTrustTier(item) === "DEMO_NEEDS_VERIFICATION");
   const trustedOpportunities = [...liveVerified, ...modelWatchlist];
   const gradedOpportunities = opportunities.filter(isTrustedHomeSignal);
+  const shortHorizonOpportunities = gradedOpportunities.filter(isHomepageDecisionSignal);
+  const longTermWatchlist = gradedOpportunities
+    .filter((item) => !isHomepageDecisionSignal(item))
+    .sort((a, b) => b.actionableScore - a.actionableScore)
+    .slice(0, 3);
   const overheated = opportunities.filter(isTrustedOverheatedSignal);
   const basketSignals = opportunities.filter((item) => item.side === "BASKET" && getOpportunityTrustTier(item) !== "DEMO_NEEDS_VERIFICATION");
-  const actionableWatchlist = gradedOpportunities
+  const actionableWatchlist = shortHorizonOpportunities
     .sort((a, b) => b.actionableScore - a.actionableScore)
     .slice(0, 3);
   const biggestPositiveEdge = Math.max(...trustedOpportunities.map((item) => item.edgeScore), 0);
   const biggestNegativeEdge = Math.min(...trustedOpportunities.map((item) => item.edgeScore), 0);
   const updatedAt = newestUpdate(opportunities);
-  const topPick = pickTopOpportunity(gradedOpportunities);
-  const marketRead = buildMarketRead(gradedOpportunities.length, topPick, locale);
+  const topPick = pickTopOpportunity(shortHorizonOpportunities);
+  const nextMatch = upcomingMatches[0] ?? null;
+  const marketRead = buildMarketRead(shortHorizonOpportunities.length, topPick, nextMatch, locale);
   const suitableForAction = topPick?.executionStatus === "ACTIONABLE_WATCH";
   const fanSummary = buildFanSummary({
     topPick,
-    gradedCount: gradedOpportunities.length,
+    nextMatch,
+    gradedCount: shortHorizonOpportunities.length,
     modelWatchlistCount: modelWatchlist.length,
     demoCount: demoSignals.length,
     locale
@@ -90,6 +102,8 @@ export default async function HomePage() {
           </div>
         </div>
 
+        <UpcomingMatchesSection matches={upcomingMatches} locale={locale} />
+
         <section className="mb-6 border-y border-line py-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -113,7 +127,7 @@ export default async function HomePage() {
               <MetricCard label={locale === "zh" ? "Live Verified" : "Live Verified"} value={String(liveVerified.length)} tone={liveVerified.length ? "positive" : "neutral"} />
               <MetricCard label={locale === "zh" ? "模型观察" : "Model Watchlist"} value={String(modelWatchlist.length)} tone={modelWatchlist.length ? "positive" : "neutral"} />
               <MetricCard label={locale === "zh" ? "待验证" : "Demo / Verify"} value={String(demoSignals.length)} tone={demoSignals.length ? "neutral" : "positive"} />
-              <MetricCard label={locale === "zh" ? "A/B 级信号" : "A/B Grade"} value={String(gradedOpportunities.length)} tone={gradedOpportunities.length ? "positive" : "neutral"} />
+              <MetricCard label={locale === "zh" ? "近期 A/B 信号" : "Near-term A/B"} value={String(shortHorizonOpportunities.length)} tone={shortHorizonOpportunities.length ? "positive" : "neutral"} />
               <MetricCard label={locale === "zh" ? "适合行动" : "Action Fit"} value={suitableForAction ? (locale === "zh" ? "观察执行" : "Watch") : (locale === "zh" ? "等待" : "Wait")} tone={suitableForAction ? "positive" : "neutral"} />
               <MetricCard label={locale === "zh" ? "追高风险" : "Overheated Favorites"} value={String(overheated.length)} tone={overheated.length ? "negative" : "neutral"} />
             </div>
@@ -147,17 +161,17 @@ export default async function HomePage() {
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">
-              Top Pick
+              {locale === "zh" ? "Near-term Pick" : "Near-term Pick"}
             </h2>
             <span className="text-xs text-zinc-500">
-              {locale === "zh" ? "今日首选信号" : "Primary daily signal"}
+              {locale === "zh" ? "只看近期可验证市场" : "Short-horizon signals only"}
             </span>
           </div>
           {topPick ? (
             <TopPickCard opportunity={topPick} locale={locale} />
           ) : (
             <div className="rounded-lg border border-line bg-panel p-5 text-sm text-zinc-500">
-              {locale === "zh" ? "今日暂无首选机会" : "No top pick today"}
+              {locale === "zh" ? "今日暂无近期首选机会。长期世界杯 futures 已降级到观察清单，避免把赛程信息滞后的市场当作今日判断。" : "No near-term top pick today. Long-range World Cup futures stay in the watchlist instead of the daily decision layer."}
             </div>
           )}
         </section>
@@ -182,6 +196,24 @@ export default async function HomePage() {
           </div>
         </section>
 
+        {longTermWatchlist.length ? (
+          <section className="mb-6">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">
+                {locale === "zh" ? "Long-term Futures Watchlist / 长期观察" : "Long-term Futures Watchlist"}
+              </h2>
+              <span className="text-xs text-zinc-500">
+                {locale === "zh" ? "不会进入今日首选" : "Excluded from daily top pick"}
+              </span>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              {longTermWatchlist.map((opportunity) => (
+                <OpportunityCard key={`${opportunity.marketSlug}-${opportunity.outcomeName}-${opportunity.side}`} opportunity={opportunity} locale={locale} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         <div className="grid gap-6 lg:grid-cols-2">
           <SignalPanel
             title={locale === "zh" ? "Avoid Chasing / 可能被市场追高的热门" : "Avoid Chasing / Overheated Favorites"}
@@ -202,6 +234,143 @@ export default async function HomePage() {
       <Disclaimer locale={locale} />
     </main>
   );
+}
+
+function UpcomingMatchesSection({
+  matches,
+  locale
+}: {
+  matches: UpcomingMatch[];
+  locale: "zh" | "en";
+}) {
+  return (
+    <section className="mb-6 border-b border-line pb-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">
+          {locale === "zh" ? "Upcoming Matches / 即将开赛" : "Upcoming Matches"}
+        </h2>
+        <span className="text-xs text-zinc-500">
+          {locale === "zh" ? "未来比赛公允概率" : "Match fair probabilities"}
+        </span>
+      </div>
+      {matches.length ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {matches.map((match) => (
+            <UpcomingMatchCard key={match.matchSlug} match={match} locale={locale} />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-line bg-panel p-5 text-sm text-zinc-500">
+          {locale === "zh" ? "暂无即将开赛比赛。" : "No upcoming matches yet."}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UpcomingMatchCard({
+  match,
+  locale
+}: {
+  match: UpcomingMatch;
+  locale: "zh" | "en";
+}) {
+  const time = formatMatchTime(match.startTime, locale);
+  const marketRows = [
+    {
+      label: match.homeTeam,
+      market: match.homeProbability,
+      fair: match.fairHomeProbability
+    },
+    {
+      label: locale === "zh" ? "平局" : "Draw",
+      market: match.drawProbability,
+      fair: match.fairDrawProbability
+    },
+    {
+      label: match.awayTeam,
+      market: match.awayProbability,
+      fair: match.fairAwayProbability
+    }
+  ];
+
+  return (
+    <article className="rounded-lg border border-line bg-panel p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-zinc-600">{time}</p>
+          <h3 className="mt-2 text-xl font-semibold text-zinc-100">
+            {match.homeTeam} vs {match.awayTeam}
+          </h3>
+          {match.marketSourceUrl ? (
+            <a
+              href={match.marketSourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex text-xs text-zinc-500 hover:text-zinc-200"
+            >
+              Polymarket
+            </a>
+          ) : null}
+        </div>
+        <div className="rounded border border-line bg-zinc-950 px-3 py-2 text-right">
+          <div className="text-xs uppercase tracking-wide text-zinc-600">
+            {locale === "zh" ? "LLM 修正" : "LLM Adjustment"}
+          </div>
+          <div className="mt-1 font-mono text-sm font-semibold text-zinc-100">
+            {signedPercent(match.llmAdjustment)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {marketRows.map((row) => (
+          <div key={row.label} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 text-sm">
+            <span className="truncate text-zinc-300">{row.label}</span>
+            <span className="font-mono text-zinc-500">{percent(row.market)}</span>
+            <span className="font-mono text-zinc-100">{percent(row.fair)}</span>
+            <span className={`font-mono ${edgeTone((row.fair ?? 0) - (row.market ?? 0))}`}>
+              {signedPercent((row.fair ?? 0) - (row.market ?? 0))}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {(match.deepseekResearch || match.gptSummary) ? (
+        <div className="mt-5 grid gap-3 text-xs leading-5 lg:grid-cols-2">
+          <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
+            <span className="font-mono text-zinc-300">DeepSeek</span>
+            <br />
+            {match.deepseekResearch ?? (locale === "zh" ? "暂无摘要。" : "No summary yet.")}
+          </p>
+          <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
+            <span className="font-mono text-zinc-300">GPT</span>
+            <br />
+            {match.gptSummary ?? (locale === "zh" ? "暂无总结。" : "No summary yet.")}
+          </p>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function formatMatchTime(value: Date | string | null | undefined, locale: "zh" | "en") {
+  if (!value) return locale === "zh" ? "时间待确认" : "Time TBD";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return locale === "zh" ? "时间待确认" : "Time TBD";
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    timeZone: "Asia/Shanghai",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function edgeTone(value: number) {
+  if (value >= 0.02) return "text-emerald-300";
+  if (value <= -0.02) return "text-red-300";
+  return "text-zinc-500";
 }
 
 function TopPickCard({
@@ -406,11 +575,23 @@ function pickTopOpportunity(candidates: MarketOpportunity[]) {
   return [...candidates].sort((a, b) => b.actionableScore - a.actionableScore)[0] ?? null;
 }
 
+function isHomepageDecisionSignal(opportunity: MarketOpportunity) {
+  if (opportunity.side === "BASKET") return true;
+  return opportunity.marketType === "OTHER";
+}
+
 function buildMarketRead(
   gradedCount: number,
   topPick: MarketOpportunity | null,
+  nextMatch: UpcomingMatch | null,
   locale: "zh" | "en"
 ) {
+  if (nextMatch) {
+    const time = formatMatchTime(nextMatch.startTime, locale);
+    return locale === "zh"
+      ? `下一场先看 ${nextMatch.homeTeam} vs ${nextMatch.awayTeam}（${time}），首页只把近期比赛放进今日判断。`
+      : `Next up: ${nextMatch.homeTeam} vs ${nextMatch.awayTeam} (${time}). The home page decision layer now prioritizes near-term matches.`;
+  }
   if (gradedCount > 0 && topPick) {
     const tier = getOpportunityTrustTier(topPick);
     return locale === "zh"
@@ -424,17 +605,32 @@ function buildMarketRead(
 
 function buildFanSummary({
   topPick,
+  nextMatch,
   gradedCount,
   modelWatchlistCount,
   demoCount,
   locale
 }: {
   topPick: MarketOpportunity | null;
+  nextMatch: UpcomingMatch | null;
   gradedCount: number;
   modelWatchlistCount: number;
   demoCount: number;
   locale: "zh" | "en";
 }) {
+  if (nextMatch) {
+    return {
+      tone: "neutral" as const,
+      headline:
+        locale === "zh"
+          ? `首页先看 ${nextMatch.homeTeam} vs ${nextMatch.awayTeam}`
+          : `Start with ${nextMatch.homeTeam} vs ${nextMatch.awayTeam}`,
+      body:
+        locale === "zh"
+          ? "杯赛长期市场会受赛果和赛程路径快速影响，现在只放在观察区；今日结论优先看即将开赛的比赛、公允概率和大模型解释。"
+          : "Long-range futures can go stale quickly after match results, so they stay in a watch area. The daily call starts with upcoming matches, fair probabilities, and model research."
+    };
+  }
   if (topPick && gradedCount > 0) {
     return {
       tone: "positive" as const,

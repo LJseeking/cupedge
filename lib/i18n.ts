@@ -94,7 +94,7 @@ export const dictionaries = {
       bookmaker: "博彩公司",
       edgeScore: "Edge Score",
       signal: "信号",
-      aiSeed: "AI 种子概率",
+      aiSeed: "量化概率",
       explanation: "解释",
       summaryFair: "{team} 当前价格接近公允概率估计。",
       summaryUndervalued: "{team} 比公允概率估计低 {edge} 个百分点。",
@@ -114,7 +114,7 @@ export const dictionaries = {
         ],
         fair: [
           "Polymarket 当前价格接近公允概率估计。",
-          "博彩公司隐含概率和本地 AI 种子没有显示明显错配。",
+          "市场共识、量化模拟和 LLM 小幅修正没有显示明显错配。",
           "Edge 处于中性区间，因此 CupEdge 标记为无明显高估/低估。"
         ]
       }
@@ -283,7 +283,7 @@ export const dictionaries = {
       bookmaker: "Bookmaker",
       edgeScore: "Edge Score",
       signal: "Signal",
-      aiSeed: "AI seed",
+      aiSeed: "Quant probability",
       explanation: "Explanation",
       summaryFair: "{team} is trading close to the current fair probability estimate.",
       summaryUndervalued: "{team} is priced below its fair probability estimate by {edge} percentage points.",
@@ -303,7 +303,7 @@ export const dictionaries = {
         ],
         fair: [
           "Polymarket is close to the current fair probability estimate.",
-          "Bookmaker-implied probability and the simple AI seed do not show a large mismatch.",
+          "Market consensus, quant simulation, and bounded LLM adjustment do not show a large mismatch.",
           "The edge is inside the neutral range, so CupEdge marks it as no clear mispricing."
         ]
       }

@@ -66,6 +66,15 @@ model TeamValuation {
   polymarketProbability Float
   bookmakerProbability  Float?
   aiProbability         Float?
+  marketConsensusProbability Float?
+  quantProbability       Float?
+  llmAdjustment          Float    @default(0)
+  llmAdjustmentReason    String?
+  llmModelCount          Int      @default(0)
+  deepseekResearch       String?
+  gptSummary             String?
+  researchSources        String?
+  probabilityModelVersion String  @default("cupedge-v2")
   fairProbability       Float
   edgeScore             Float
   status                String
@@ -76,6 +85,84 @@ model TeamValuation {
 
   @@index([edgeScore])
   @@index([status])
+}
+
+model ResearchInsight {
+  id               String   @id @default(cuid())
+  scopeType        String
+  scopeKey         String
+  teamSlug         String?
+  marketSlug       String?
+  opportunityId    String?
+  matchSlug        String?
+  deepseekResearch String?
+  gptSummary       String?
+  llmAdjustment    Float    @default(0)
+  researchSources  String?
+  confidence       String?
+  modelCount       Int      @default(0)
+  capturedAt       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([scopeType, scopeKey])
+  @@index([scopeType])
+  @@index([teamSlug])
+  @@index([marketSlug])
+  @@index([opportunityId])
+  @@index([matchSlug])
+  @@index([capturedAt])
+}
+
+model UpcomingMatch {
+  id                    String   @id @default(cuid())
+  matchSlug             String   @unique
+  marketSlug            String?
+  marketTitle           String
+  homeTeam              String
+  awayTeam              String
+  homeTeamSlug          String?
+  awayTeamSlug          String?
+  startTime             DateTime?
+  homeProbability       Float?
+  drawProbability       Float?
+  awayProbability       Float?
+  fairHomeProbability   Float?
+  fairDrawProbability   Float?
+  fairAwayProbability   Float?
+  llmAdjustment         Float    @default(0)
+  deepseekResearch      String?
+  gptSummary            String?
+  researchSources       String?
+  marketSourceUrl       String?
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  @@index([startTime])
+  @@index([homeTeamSlug])
+  @@index([awayTeamSlug])
+}
+
+model MatchResult {
+  id            String   @id @default(cuid())
+  matchKey      String   @unique
+  homeTeam      String
+  awayTeam      String
+  homeTeamSlug  String
+  awayTeamSlug  String
+  homeScore     Int
+  awayScore     Int
+  playedAt      DateTime?
+  sourceUrl     String?
+  sourceTitle   String?
+  sourceSummary String?
+  confidence    String   @default("medium")
+  rawJson       String?
+  capturedAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([homeTeamSlug])
+  @@index([awayTeamSlug])
+  @@index([playedAt])
 }
 
 model BookmakerOdd {

@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Disclaimer } from "@/components/disclaimer";
 import { OpportunityCard, marketTypeText } from "@/components/opportunity-card";
+import { ResearchInsightPanel } from "@/components/research-insight-panel";
 import { getLocale } from "@/lib/i18n-server";
 import { getMarketDetail } from "@/lib/services/opportunities";
+import { getResearchInsightForMarket } from "@/lib/services/research-insights";
 import { percent, signedPercent } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,7 @@ export default async function MarketDetailPage({
   const { marketSlug } = await params;
   const detail = await getMarketDetail(marketSlug);
   if (!detail) notFound();
+  const researchInsight = await getResearchInsightForMarket(detail.summary.marketSlug);
   const basket = detail.opportunities.find((item) => item.side === "BASKET");
   const volumeIsLive = detail.summary.volumeSource === "LIVE_POLYMARKET";
   const isDemoMode =
@@ -77,6 +80,8 @@ export default async function MarketDetailPage({
             </p>
           </section>
         ) : null}
+
+        <ResearchInsightPanel insight={researchInsight} locale={locale} />
 
         <section className="mt-6">
           <h2 className="mb-3 font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">

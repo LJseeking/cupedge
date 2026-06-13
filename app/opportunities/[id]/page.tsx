@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Bell, History, LockKeyhole } from "lucide-react";
 import { Disclaimer } from "@/components/disclaimer";
 import { dataQualityText, executionStatusText, marketTypeText } from "@/components/opportunity-card";
+import { ResearchInsightPanel } from "@/components/research-insight-panel";
 import { getLocale } from "@/lib/i18n-server";
 import { getOpportunityDetail } from "@/lib/services/opportunities";
 import { getOpportunityTrustTier, trustTierText } from "@/lib/services/opportunity-trust";
+import { getResearchInsightForOpportunity } from "@/lib/services/research-insights";
 import type { MarketOpportunity } from "@/lib/types/opportunity";
 import { percent, signedPercent } from "@/lib/utils";
 
@@ -21,6 +23,7 @@ export default async function OpportunityDetailPage({
   const opportunity = await getOpportunityDetail(id);
   if (!opportunity) notFound();
   const trustTier = getOpportunityTrustTier(opportunity);
+  const researchInsight = await getResearchInsightForOpportunity(opportunity);
 
   return (
     <main>
@@ -137,6 +140,8 @@ export default async function OpportunityDetailPage({
             </p>
           )}
         </section>
+
+        <ResearchInsightPanel insight={researchInsight} locale={locale} />
 
         <section className="mt-6 grid gap-3 sm:grid-cols-3">
           <LockedLink icon="alert" label="Set Alert" />

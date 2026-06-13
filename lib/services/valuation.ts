@@ -6,6 +6,11 @@ import {
 import { isQualifiedTeamSlug, QUALIFIED_TEAM_SLUGS } from "@/lib/data/qualified-teams";
 import { SEEDED_TEAMS } from "@/lib/data/seed";
 import { prisma } from "@/lib/db/prisma";
+import {
+  calculateProbabilityV2,
+  getLlmProbabilityAdjustments,
+  type LlmProbabilityAdjustment
+} from "@/lib/services/probability-v2";
 import { getTournamentProjectionMap } from "@/lib/services/tournament-simulation";
 import type { TeamTournamentProjection } from "@/lib/types/projection";
 import type {
@@ -83,17 +88,36 @@ export async function updateValuations(options: UpdateValuationOptions = {}) {
       ]);
 
   const capturedAt = new Date();
+  const teamSeeds = teams.map((team) => ({
+    name: team.name,
+    slug: team.slug,
+    countryCode: team.countryCode ?? undefined,
+    group: team.group ?? undefined,
+    seedAiProbability: team.seedAiProbability ?? 0
+  }));
+  const llmAdjustments = options.forceMock
+    ? new Map<string, LlmProbabilityAdjustment>()
+    : await getLlmProbabilityAdjustments(
+        teamSeeds.map((team) => {
+          const poly = polymarketQuotes.find((quote) => quote.slug === team.slug);
+          const odds = bookmakerProbabilities.find((probability) => probability.slug === team.slug);
+          const projection = projectionMap.get(team.slug);
+          return {
+            slug: team.slug,
+            teamName: team.name,
+            polymarketProbability: poly?.probability,
+            bookmakerProbability: odds?.bookmakerProbability,
+            quantProbability: projection?.winTournamentProbability ?? team.seedAiProbability,
+            seedProbability: team.seedAiProbability
+          };
+        })
+      );
   const valuationRows = buildValuationRows({
-    teams: teams.map((team) => ({
-      name: team.name,
-      slug: team.slug,
-      countryCode: team.countryCode ?? undefined,
-      group: team.group ?? undefined,
-      seedAiProbability: team.seedAiProbability ?? 0
-    })),
+    teams: teamSeeds,
     polymarketQuotes,
     bookmakerProbabilities,
     projectionMap,
+    llmAdjustments,
     updatedAt: capturedAt
   });
 
@@ -110,6 +134,15 @@ export async function updateValuations(options: UpdateValuationOptions = {}) {
           polymarketProbability: row.polymarketProbability,
           bookmakerProbability: row.bookmakerProbability,
           aiProbability: row.aiProbability,
+          marketConsensusProbability: row.marketConsensusProbability,
+          quantProbability: row.quantProbability,
+          llmAdjustment: row.llmAdjustment ?? 0,
+          llmAdjustmentReason: row.llmAdjustmentReason,
+          llmModelCount: row.llmModelCount ?? 0,
+          deepseekResearch: row.deepseekResearch,
+          gptSummary: row.gptSummary,
+          researchSources: row.researchSources,
+          probabilityModelVersion: row.probabilityModelVersion ?? "cupedge-v2",
           fairProbability: row.fairProbability,
           edgeScore: row.edgeScore,
           status: row.status,
@@ -121,6 +154,15 @@ export async function updateValuations(options: UpdateValuationOptions = {}) {
           polymarketProbability: row.polymarketProbability,
           bookmakerProbability: row.bookmakerProbability,
           aiProbability: row.aiProbability,
+          marketConsensusProbability: row.marketConsensusProbability,
+          quantProbability: row.quantProbability,
+          llmAdjustment: row.llmAdjustment ?? 0,
+          llmAdjustmentReason: row.llmAdjustmentReason,
+          llmModelCount: row.llmModelCount ?? 0,
+          deepseekResearch: row.deepseekResearch,
+          gptSummary: row.gptSummary,
+          researchSources: row.researchSources,
+          probabilityModelVersion: row.probabilityModelVersion ?? "cupedge-v2",
           fairProbability: row.fairProbability,
           edgeScore: row.edgeScore,
           status: row.status,
@@ -162,7 +204,21 @@ export async function updateValuations(options: UpdateValuationOptions = {}) {
             spread: poly?.spread,
             liquidity: poly?.liquidity,
             volume: poly?.volume,
-            rawJson: stringifyRaw({ poly: poly?.rawJson, odds: odds?.rawJson }),
+            rawJson: stringifyRaw({
+              poly: poly?.rawJson,
+              odds: odds?.rawJson,
+              model: {
+                version: row.probabilityModelVersion,
+                marketConsensusProbability: row.marketConsensusProbability,
+                quantProbability: row.quantProbability,
+                llmAdjustment: row.llmAdjustment,
+                llmModelCount: row.llmModelCount,
+                llmAdjustmentReason: row.llmAdjustmentReason,
+                deepseekResearch: row.deepseekResearch,
+                gptSummary: row.gptSummary,
+                researchSources: row.researchSources
+              }
+            }),
             capturedAt
           }
         ]
@@ -363,6 +419,15 @@ export async function getCurrentValuations(): Promise<ValuationRow[]> {
           polymarketProbability: row.polymarketProbability,
           bookmakerProbability: row.bookmakerProbability,
           aiProbability: row.aiProbability,
+          marketConsensusProbability: row.marketConsensusProbability,
+          quantProbability: row.quantProbability,
+          llmAdjustment: row.llmAdjustment,
+          llmAdjustmentReason: row.llmAdjustmentReason,
+          llmModelCount: row.llmModelCount,
+          deepseekResearch: row.deepseekResearch,
+          gptSummary: row.gptSummary,
+          researchSources: row.researchSources,
+          probabilityModelVersion: row.probabilityModelVersion,
           fairProbability: row.fairProbability,
           edgeScore: row.edgeScore,
           status: row.status as TeamStatus,
@@ -389,12 +454,30 @@ export async function getTeamDetail(slug: string): Promise<TeamDetail | null> {
   };
 }
 
+export async function getCurrentTeamProbabilityV2Map() {
+  const valuations = await getCurrentValuations();
+  return new Map(
+    valuations.map((row) => [
+      row.slug,
+      {
+        fairProbability: row.fairProbability,
+        marketConsensusProbability: row.marketConsensusProbability,
+        quantProbability: row.quantProbability,
+        llmAdjustment: row.llmAdjustment ?? 0,
+        llmModelCount: row.llmModelCount ?? 0,
+        probabilityModelVersion: row.probabilityModelVersion ?? "cupedge-v2"
+      }
+    ])
+  );
+}
+
 export function buildMockValuationRows() {
   return buildValuationRows({
     teams: SEEDED_TEAMS,
     polymarketQuotes: getMockPolymarketQuotes(),
     bookmakerProbabilities: getMockBookmakerProbabilities(),
     projectionMap: new Map<string, TeamTournamentProjection>(),
+    llmAdjustments: new Map<string, LlmProbabilityAdjustment>(),
     updatedAt: new Date()
   });
 }
@@ -404,12 +487,14 @@ export function buildValuationRows({
   polymarketQuotes,
   bookmakerProbabilities,
   projectionMap,
+  llmAdjustments,
   updatedAt
 }: {
   teams: TeamSeed[];
   polymarketQuotes: PolymarketTeamQuote[];
   bookmakerProbabilities: BookmakerTeamProbability[];
   projectionMap?: Map<string, TeamTournamentProjection>;
+  llmAdjustments?: Map<string, LlmProbabilityAdjustment>;
   updatedAt: Date;
 }): ValuationRow[] {
   return teams
@@ -421,7 +506,18 @@ export function buildValuationRows({
       const aiProbability = clampProbability(projection?.winTournamentProbability ?? team.seedAiProbability);
       const polymarketProbability = clampProbability(poly?.probability ?? aiProbability);
       const bookmakerProbability = odds?.bookmakerProbability;
-      const fairProbability = calculateFairProbability(bookmakerProbability, aiProbability);
+      const probabilityV2 = calculateProbabilityV2(
+        {
+          slug: team.slug,
+          teamName: team.name,
+          polymarketProbability,
+          bookmakerProbability,
+          quantProbability: aiProbability,
+          seedProbability: team.seedAiProbability
+        },
+        llmAdjustments?.get(team.slug)
+      );
+      const fairProbability = probabilityV2.fairProbability;
       const edgeScore = fairProbability - polymarketProbability;
       const status = calculateStatus(edgeScore);
       const confidence = calculateConfidence(poly, bookmakerProbability);
@@ -434,6 +530,15 @@ export function buildValuationRows({
         polymarketProbability,
         bookmakerProbability,
         aiProbability,
+        marketConsensusProbability: probabilityV2.marketConsensusProbability,
+        quantProbability: probabilityV2.quantProbability,
+        llmAdjustment: probabilityV2.llmAdjustment,
+        llmAdjustmentReason: probabilityV2.llmAdjustmentReason,
+        llmModelCount: probabilityV2.llmModelCount,
+        deepseekResearch: probabilityV2.deepseekResearch,
+        gptSummary: probabilityV2.gptSummary,
+        researchSources: probabilityV2.researchSources,
+        probabilityModelVersion: probabilityV2.probabilityModelVersion,
         fairProbability,
         edgeScore,
         status,
@@ -447,11 +552,22 @@ export function buildValuationRows({
 
 export function calculateFairProbability(
   bookmakerProbability: number | null | undefined,
-  aiProbability: number | null | undefined
+  aiProbability: number | null | undefined,
+  polymarketProbability?: number | null | undefined,
+  llmAdjustment?: number | null | undefined
 ) {
-  const bookmaker = bookmakerProbability ?? aiProbability ?? 0;
-  const ai = aiProbability ?? bookmakerProbability ?? 0;
-  return clampProbability(bookmaker * 0.7 + ai * 0.3);
+  return calculateProbabilityV2({
+    slug: "unknown",
+    teamName: "Unknown",
+    bookmakerProbability,
+    polymarketProbability,
+    quantProbability: aiProbability,
+    seedProbability: aiProbability
+  }, {
+    slug: "unknown",
+    adjustment: llmAdjustment ?? 0,
+    modelCount: llmAdjustment ? 1 : 0
+  }).fairProbability;
 }
 
 export function calculateStatus(edgeScore: number): TeamStatus {
@@ -498,7 +614,7 @@ export function buildExplanations(row: ValuationRow) {
   if (row.status.includes("undervalued")) {
     return [
       "Polymarket is pricing this team below its fair probability estimate.",
-      "Bookmaker-implied probability is higher than the Polymarket price.",
+      "CupEdge v2 blends market consensus, quant simulation, and any bounded LLM adjustment.",
       "The edge is large enough to be flagged as a potential value opportunity.",
       "The signal remains probabilistic and can change quickly as market prices move."
     ];
@@ -515,7 +631,7 @@ export function buildExplanations(row: ValuationRow) {
 
   return [
     "Polymarket is close to the current fair probability estimate.",
-    "Bookmaker-implied probability and the simple AI seed do not show a large mismatch.",
+    "Market consensus, quant simulation, and bounded LLM adjustment do not show a large mismatch.",
     "The edge is inside the neutral range, so CupEdge marks it as fair."
   ];
 }

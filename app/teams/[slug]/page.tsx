@@ -3,9 +3,11 @@ import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Disclaimer } from "@/components/disclaimer";
 import { MetricCard } from "@/components/metric-card";
+import { ResearchInsightPanel } from "@/components/research-insight-panel";
 import { ConfidenceText, StatusBadge } from "@/components/status-badge";
 import { getDictionary, teamExplanations, teamSummary } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n-server";
+import { getResearchInsightForTeam } from "@/lib/services/research-insights";
 import { getTeamDetail } from "@/lib/services/valuation";
 import { edgeTextClasses, percent, signedPercent } from "@/lib/utils";
 
@@ -19,6 +21,7 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
   if (!team) notFound();
   const summary = teamSummary(team, locale);
   const explanations = teamExplanations(team, locale);
+  const researchInsight = await getResearchInsightForTeam(team.slug);
 
   return (
     <main>
@@ -52,6 +55,26 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
           />
         </div>
 
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label={locale === "zh" ? "市场共识" : "Market Consensus"}
+            value={percent(team.marketConsensusProbability)}
+          />
+          <MetricCard
+            label={locale === "zh" ? "量化模拟" : "Quant Simulation"}
+            value={percent(team.quantProbability ?? team.aiProbability)}
+          />
+          <MetricCard
+            label={locale === "zh" ? "LLM 修正" : "LLM Adjustment"}
+            value={signedPercent(team.llmAdjustment ?? 0)}
+            tone={(team.llmAdjustment ?? 0) > 0 ? "positive" : (team.llmAdjustment ?? 0) < 0 ? "negative" : "neutral"}
+          />
+          <MetricCard
+            label={locale === "zh" ? "概率版本" : "Model Version"}
+            value={team.probabilityModelVersion ?? "cupedge-v2"}
+          />
+        </div>
+
         <section className="mt-6 grid gap-4 lg:grid-cols-[0.75fr_1.25fr]">
           <div className="rounded-lg border border-line bg-panel p-4">
             <h2 className="font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">
@@ -75,6 +98,10 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
                 <dd className="font-mono text-zinc-100">{percent(team.aiProbability)}</dd>
               </div>
               <div className="flex items-center justify-between gap-4">
+                <dt className="text-zinc-500">{locale === "zh" ? "LLM 模型数" : "LLM Models"}</dt>
+                <dd className="font-mono text-zinc-100">{team.llmModelCount ?? 0}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
                 <dt className="text-zinc-500">{t.table.edge}</dt>
                 <dd className={`font-mono font-semibold ${edgeTextClasses(team.edgeScore)}`}>
                   {signedPercent(team.edgeScore)}
@@ -93,9 +120,17 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
                   {explanation}
                 </li>
               ))}
+              {team.llmAdjustmentReason ? (
+                <li className="border-l border-line pl-3 text-zinc-400">
+                  {locale === "zh" ? "LLM 修正理由：" : "LLM adjustment: "}
+                  {team.llmAdjustmentReason}
+                </li>
+              ) : null}
             </ul>
           </div>
         </section>
+
+        <ResearchInsightPanel insight={researchInsight} locale={locale} />
       </section>
       <Disclaimer locale={locale} />
     </main>

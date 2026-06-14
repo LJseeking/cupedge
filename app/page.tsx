@@ -25,7 +25,7 @@ export default async function HomePage() {
   const t = getDictionary(locale);
   const [opportunities, upcomingMatches] = await Promise.all([
     getMarketOpportunities(),
-    getUpcomingMatches(4)
+    getUpcomingMatches(3)
   ]);
   const liveVerified = opportunities.filter((item) => getOpportunityTrustTier(item) === "LIVE_VERIFIED");
   const modelWatchlist = opportunities.filter((item) => getOpportunityTrustTier(item) === "MODEL_WATCHLIST");
@@ -250,11 +250,11 @@ function UpcomingMatchesSection({
           {locale === "zh" ? "Upcoming Matches / 即将开赛" : "Upcoming Matches"}
         </h2>
         <span className="text-xs text-zinc-500">
-          {locale === "zh" ? "未来比赛公允概率" : "Match fair probabilities"}
+          {locale === "zh" ? "CCTV 官方赛程 + CupEdge 公允概率" : "Official schedule + CupEdge fair probabilities"}
         </span>
       </div>
       {matches.length ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           {matches.map((match) => (
             <UpcomingMatchCard key={match.matchSlug} match={match} locale={locale} />
           ))}
@@ -276,6 +276,9 @@ function UpcomingMatchCard({
   locale: "zh" | "en";
 }) {
   const time = formatMatchTime(match.startTime, locale);
+  const hasMarketPrices = [match.homeProbability, match.drawProbability, match.awayProbability].some(
+    (value) => value !== null && value !== undefined
+  );
   const marketRows = [
     {
       label: match.homeTeam,
@@ -293,6 +296,10 @@ function UpcomingMatchCard({
       fair: match.fairAwayProbability
     }
   ];
+  const fairProbabilityNote =
+    locale === "zh"
+      ? "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；若未匹配到 Polymarket 盘口，只展示公允概率，不计算真实 Edge。"
+      : "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Without a matched Polymarket market, no live edge is calculated.";
 
   return (
     <article className="rounded-lg border border-line bg-panel p-5">
@@ -309,7 +316,7 @@ function UpcomingMatchCard({
               rel="noreferrer"
               className="mt-2 inline-flex text-xs text-zinc-500 hover:text-zinc-200"
             >
-              Polymarket
+              {hasMarketPrices ? "Polymarket" : locale === "zh" ? "CCTV 官方赛程" : "Official schedule"}
             </a>
           ) : null}
         </div>
@@ -324,27 +331,40 @@ function UpcomingMatchCard({
       </div>
 
       <div className="mt-5 space-y-3">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] uppercase tracking-wide text-zinc-600">
+          <span>{locale === "zh" ? "结果" : "Outcome"}</span>
+          <span>{locale === "zh" ? "市场" : "Market"}</span>
+          <span>{locale === "zh" ? "公允" : "Fair"}</span>
+          <span>Edge</span>
+        </div>
         {marketRows.map((row) => (
           <div key={row.label} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 text-sm">
             <span className="truncate text-zinc-300">{row.label}</span>
-            <span className="font-mono text-zinc-500">{percent(row.market)}</span>
+            <span className="font-mono text-zinc-500">{formatOptionalPercent(row.market, locale)}</span>
             <span className="font-mono text-zinc-100">{percent(row.fair)}</span>
-            <span className={`font-mono ${edgeTone((row.fair ?? 0) - (row.market ?? 0))}`}>
-              {signedPercent((row.fair ?? 0) - (row.market ?? 0))}
+            <span className={`font-mono ${edgeTone(edgeValue(row.fair, row.market))}`}>
+              {row.market === null || row.market === undefined ? "--" : signedPercent((row.fair ?? 0) - row.market)}
             </span>
           </div>
         ))}
       </div>
+      <p className="mt-4 rounded border border-line bg-zinc-950/40 p-3 text-xs leading-5 text-zinc-500">
+        {fairProbabilityNote}
+      </p>
 
       {(match.deepseekResearch || match.gptSummary) ? (
         <div className="mt-5 grid gap-3 text-xs leading-5 lg:grid-cols-2">
           <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
-            <span className="font-mono text-zinc-300">DeepSeek</span>
+            <span className="font-mono text-zinc-300">
+              {locale === "zh" ? "DeepSeek 研究" : "DeepSeek Research"}
+            </span>
             <br />
             {match.deepseekResearch ?? (locale === "zh" ? "暂无摘要。" : "No summary yet.")}
           </p>
           <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
-            <span className="font-mono text-zinc-300">Gemini</span>
+            <span className="font-mono text-zinc-300">
+              {locale === "zh" ? "Gemini 总结" : "Gemini Summary"}
+            </span>
             <br />
             {match.gptSummary ?? (locale === "zh" ? "暂无总结。" : "No summary yet.")}
           </p>
@@ -365,6 +385,16 @@ function formatMatchTime(value: Date | string | null | undefined, locale: "zh" |
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+}
+
+function formatOptionalPercent(value: number | null | undefined, locale: "zh" | "en") {
+  if (value === null || value === undefined) return locale === "zh" ? "未匹配" : "unmatched";
+  return percent(value);
+}
+
+function edgeValue(fair: number | null | undefined, market: number | null | undefined) {
+  if (fair === null || fair === undefined || market === null || market === undefined) return 0;
+  return fair - market;
 }
 
 function edgeTone(value: number) {

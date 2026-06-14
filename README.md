@@ -153,7 +153,9 @@ Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the sc
 
 `TOURNAMENT_SIMULATIONS` controls the Monte Carlo tournament simulation count. CupEdge uses this quant model as the fair-probability anchor for winner, group winner, reach R16, reach QF, and reach SF markets.
 
-`UPCOMING_MATCH_SLUGS` is a comma-separated list of Polymarket World Cup match slugs to show on the homepage upcoming-match panel. Example: `fifwc-qat-che-2026-06-13`.
+`CCTV_SCHEDULE_API_BASE` configures the official World Cup schedule API used by the homepage upcoming-match panel. It defaults to `https://cbs-u.sports.cctv.com/pc`, the data source behind CCTV's 2026 World Cup schedule page. `UPCOMING_MATCH_LIMIT` defaults to `3`, so the homepage shows the next two to three official fixtures instead of relying on a single Polymarket slug.
+
+`UPCOMING_MATCH_SLUGS` is now optional. Use it only to overlay known Polymarket match-market prices onto the official CCTV schedule. If no matching Polymarket slug is configured, CupEdge still shows the official fixture and its model fair probabilities, but labels market price as unmatched.
 
 `MANUAL_MATCH_RESULTS` lets you force known completed results into the simulation while search catches up. Format: `United States 4-1 Paraguay @ 2026-06-12`. Multiple results can be separated by commas or new lines. `MATCH_RESULTS_JSON` accepts an array of `{ homeTeam, awayTeam, homeScore, awayScore, playedAt }` objects. During each update, CupEdge stores match results first, then reruns the tournament simulation with those known results applied to group standings before simulating remaining fixtures.
 

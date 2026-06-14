@@ -6,41 +6,88 @@ import type { UpcomingMatch } from "@/lib/types/research";
 import { clampProbability } from "@/lib/utils";
 
 type GammaRow = Record<string, unknown>;
+type CctvGame = {
+  id?: number | string;
+  gameName?: string;
+  roundType?: string;
+  startTime?: string;
+  gameStatus?: number;
+  statusDesc?: string;
+  homeName?: string;
+  guestName?: string;
+};
 
-const DEFAULT_UPCOMING_MATCH_SLUGS = ["fifwc-qat-che-2026-06-13"];
+const DEFAULT_UPCOMING_MATCH_LIMIT = 3;
 const POLYMARKET_BASE = "https://gamma-api.polymarket.com";
+const CCTV_SCHEDULE_BASE = "https://cbs-u.sports.cctv.com/pc";
+const CCTV_SCHEDULE_PAGE = "https://worldcup.cctv.com/2026/schedule/index.shtml";
+const CCTV_TEAM_NAME_MAP: Record<string, string> = {
+  "墨西哥": "Mexico",
+  "南非": "South Africa",
+  "韩国": "South Korea",
+  "捷克": "Czechia",
+  "加拿大": "Canada",
+  "波黑": "Bosnia and Herzegovina",
+  "卡塔尔": "Qatar",
+  "瑞士": "Switzerland",
+  "巴西": "Brazil",
+  "摩洛哥": "Morocco",
+  "海地": "Haiti",
+  "苏格兰": "Scotland",
+  "美国": "United States",
+  "巴拉圭": "Paraguay",
+  "澳大利亚": "Australia",
+  "土耳其": "Turkey",
+  "德国": "Germany",
+  "库拉索": "Curacao",
+  "科特迪瓦": "Ivory Coast",
+  "厄瓜多尔": "Ecuador",
+  "荷兰": "Netherlands",
+  "日本": "Japan",
+  "瑞典": "Sweden",
+  "突尼斯": "Tunisia",
+  "比利时": "Belgium",
+  "埃及": "Egypt",
+  "伊朗": "Iran",
+  "新西兰": "New Zealand",
+  "西班牙": "Spain",
+  "佛得角": "Cape Verde",
+  "沙特阿拉伯": "Saudi Arabia",
+  "乌拉圭": "Uruguay",
+  "法国": "France",
+  "塞内加尔": "Senegal",
+  "伊拉克": "Iraq",
+  "挪威": "Norway",
+  "阿根廷": "Argentina",
+  "阿尔及利亚": "Algeria",
+  "奥地利": "Austria",
+  "约旦": "Jordan",
+  "葡萄牙": "Portugal",
+  "刚果民主共和国": "DR Congo",
+  "乌兹别克斯坦": "Uzbekistan",
+  "哥伦比亚": "Colombia",
+  "英格兰": "England",
+  "克罗地亚": "Croatia",
+  "加纳": "Ghana",
+  "巴拿马": "Panama"
+};
 
 export async function refreshUpcomingMatches() {
-  const matches = await fetchUpcomingMatchesFromPolymarket();
+  const limit = parsePositiveInteger(process.env.UPCOMING_MATCH_LIMIT, DEFAULT_UPCOMING_MATCH_LIMIT);
+  const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
+  const polymarketMatches = await fetchUpcomingMatchesFromPolymarket();
+  const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
   const valuations = await getCurrentValuations();
   const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
   const enriched = matches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug));
 
-  await prisma.$transaction(
-    enriched.map((match) =>
-      prisma.upcomingMatch.upsert({
-        where: { matchSlug: match.matchSlug },
-        update: {
-          marketSlug: match.marketSlug,
-          marketTitle: match.marketTitle,
-          homeTeam: match.homeTeam,
-          awayTeam: match.awayTeam,
-          homeTeamSlug: match.homeTeamSlug,
-          awayTeamSlug: match.awayTeamSlug,
-          startTime: normalizeDate(match.startTime),
-          homeProbability: match.homeProbability,
-          drawProbability: match.drawProbability,
-          awayProbability: match.awayProbability,
-          fairHomeProbability: match.fairHomeProbability,
-          fairDrawProbability: match.fairDrawProbability,
-          fairAwayProbability: match.fairAwayProbability,
-          llmAdjustment: match.llmAdjustment,
-          deepseekResearch: match.deepseekResearch,
-          gptSummary: match.gptSummary,
-          researchSources: match.researchSources,
-          marketSourceUrl: match.marketSourceUrl
-        },
-        create: {
+  if (!enriched.length) return [];
+
+  await prisma.$transaction([
+    prisma.upcomingMatch.deleteMany({}),
+    ...enriched.map((match) =>
+      prisma.upcomingMatch.create({
+        data: {
           matchSlug: match.matchSlug,
           marketSlug: match.marketSlug,
           marketTitle: match.marketTitle,
@@ -63,7 +110,7 @@ export async function refreshUpcomingMatches() {
         }
       })
     )
-  );
+  ]);
 
   return enriched;
 }
@@ -86,9 +133,10 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
   if (!rows.length) {
     const valuations = await getCurrentValuations();
     const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
-    const fallback = enrichMatchFairProbabilities(buildFallbackQatarSwitzerlandMatch(), valuationBySlug);
-    const startTime = fallback.startTime ? new Date(fallback.startTime) : null;
-    if (!startTime || startTime >= now) return [fallback].slice(0, limit);
+    const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
+    if (officialMatches.length) {
+      return officialMatches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug));
+    }
   }
 
   return rows.map((row) => ({
@@ -116,10 +164,34 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
   }));
 }
 
+async function fetchUpcomingMatchesFromCctv(limit: number): Promise<UpcomingMatch[]> {
+  const base = (process.env.CCTV_SCHEDULE_API_BASE || CCTV_SCHEDULE_BASE).replace(/\/$/, "");
+  const season = process.env.WORLD_CUP_SEASON || "2026";
+  const leagueId = process.env.WORLD_CUP_LEAGUE_ID || "3400";
+  const url = `${base}/game/season_game_list?leagueId=${encodeURIComponent(leagueId)}&season=${encodeURIComponent(season)}&client=pc`;
+
+  try {
+    const data = await fetchJsonWithFallback<unknown>(url, 15_000);
+    const now = new Date();
+    return extractCctvGames(data)
+      .map(cctvGameToUpcomingMatch)
+      .filter((match): match is UpcomingMatch => Boolean(match))
+      .filter((match) => {
+        const startTime = normalizeDate(match.startTime);
+        return Boolean(startTime && startTime >= now);
+      })
+      .sort((a, b) => (normalizeDate(a.startTime)?.getTime() ?? 0) - (normalizeDate(b.startTime)?.getTime() ?? 0))
+      .slice(0, limit);
+  } catch (error) {
+    console.warn("CCTV upcoming match schedule request failed.", error);
+    return [];
+  }
+}
+
 async function fetchUpcomingMatchesFromPolymarket(): Promise<UpcomingMatch[]> {
   const base = (process.env.POLYMARKET_API_BASE || POLYMARKET_BASE).replace(/\/$/, "");
   const slugs = parseList(process.env.UPCOMING_MATCH_SLUGS);
-  const matchSlugs = slugs.length ? slugs : DEFAULT_UPCOMING_MATCH_SLUGS;
+  const matchSlugs = slugs.length ? slugs : [];
   const matches: UpcomingMatch[] = [];
 
   for (const slug of matchSlugs) {
@@ -128,11 +200,74 @@ async function fetchUpcomingMatchesFromPolymarket(): Promise<UpcomingMatch[]> {
     if (parsed) matches.push(parsed);
   }
 
-  if (!matches.length) {
-    matches.push(buildFallbackQatarSwitzerlandMatch());
-  }
-
   return matches;
+}
+
+function extractCctvGames(data: unknown): CctvGame[] {
+  if (typeof data !== "object" || data === null) return [];
+  const payload = data as Record<string, unknown>;
+  if (Array.isArray(payload.results)) return payload.results as CctvGame[];
+  if (Array.isArray(payload.data)) return payload.data as CctvGame[];
+  const nested = payload.data && typeof payload.data === "object" ? payload.data as Record<string, unknown> : {};
+  if (Array.isArray(nested.results)) return nested.results as CctvGame[];
+  if (Array.isArray(nested.list)) return nested.list as CctvGame[];
+  return [];
+}
+
+function cctvGameToUpcomingMatch(game: CctvGame): UpcomingMatch | null {
+  const homeTeam = canonicalCctvTeamName(game.homeName);
+  const awayTeam = canonicalCctvTeamName(game.guestName);
+  const startTime = parseCctvDate(game.startTime);
+  if (!homeTeam || !awayTeam || !startTime) return null;
+
+  const homeSeed = findSeedTeamByName(homeTeam) ?? findSeedTeamInText(homeTeam);
+  const awaySeed = findSeedTeamByName(awayTeam) ?? findSeedTeamInText(awayTeam);
+  const matchSlug = `cctv-${game.id ?? `${teamSlugFromName(homeTeam)}-${teamSlugFromName(awayTeam)}-${startTime.toISOString().slice(0, 10)}`}`;
+  const round = game.roundType ? ` / ${game.roundType}` : "";
+
+  return {
+    matchSlug,
+    marketSlug: null,
+    marketTitle: `${homeSeed?.name ?? homeTeam} vs ${awaySeed?.name ?? awayTeam}${round}`,
+    homeTeam: homeSeed?.name ?? homeTeam,
+    awayTeam: awaySeed?.name ?? awayTeam,
+    homeTeamSlug: homeSeed?.slug ?? teamSlugFromName(homeTeam),
+    awayTeamSlug: awaySeed?.slug ?? teamSlugFromName(awayTeam),
+    startTime,
+    llmAdjustment: 0,
+    marketSourceUrl: CCTV_SCHEDULE_PAGE,
+    updatedAt: new Date()
+  };
+}
+
+function canonicalCctvTeamName(value: unknown) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return CCTV_TEAM_NAME_MAP[trimmed] ?? trimmed;
+}
+
+function parseCctvDate(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(" ", "T");
+  const date = new Date(`${normalized}+08:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function mergePolymarketMatch(official: UpcomingMatch, polymarketMatches: UpcomingMatch[]) {
+  const polymarket = polymarketMatches.find((match) =>
+    match.homeTeamSlug === official.homeTeamSlug &&
+    match.awayTeamSlug === official.awayTeamSlug
+  );
+  if (!polymarket) return official;
+
+  return {
+    ...official,
+    marketSlug: polymarket.marketSlug,
+    homeProbability: polymarket.homeProbability,
+    drawProbability: polymarket.drawProbability,
+    awayProbability: polymarket.awayProbability,
+    marketSourceUrl: polymarket.marketSourceUrl ?? official.marketSourceUrl
+  };
 }
 
 async function fetchGammaRows(url: string) {
@@ -261,25 +396,6 @@ function findOutcomePrice(outcomes: Map<string, number>, candidates: string[]) {
   return undefined;
 }
 
-function buildFallbackQatarSwitzerlandMatch(): UpcomingMatch {
-  return {
-    matchSlug: "fifwc-qat-che-2026-06-13",
-    marketSlug: "fifwc-qat-che-2026-06-13",
-    marketTitle: "Qatar vs Switzerland",
-    homeTeam: "Qatar",
-    awayTeam: "Switzerland",
-    homeTeamSlug: "qatar",
-    awayTeamSlug: "switzerland",
-    startTime: new Date("2026-06-13T19:00:00.000Z"),
-    homeProbability: 0.066,
-    drawProbability: 0.14,
-    awayProbability: 0.81,
-    llmAdjustment: 0,
-    marketSourceUrl: "https://polymarket.com/zh/sports/world-cup/fifwc-qat-che-2026-06-13",
-    updatedAt: new Date()
-  };
-}
-
 function parseMaybeJsonArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
@@ -337,4 +453,9 @@ function parseList(value: string | undefined) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

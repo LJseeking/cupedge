@@ -333,13 +333,13 @@ async function fetchDeepSeekResearch(
         {
           role: "system",
           content:
-            "You are a low-cost football research extractor. Read provided search snippets and map relevant evidence to teams. Do not invent facts. Return strict JSON. All display text must be Simplified Chinese; keep team names in English when needed."
+            "You are a low-cost football research extractor. Read provided search snippets and map relevant evidence to teams. Do not invent facts. Return strict JSON. Every display field must contain both Simplified Chinese and English sections. Keep team names in English when needed."
         },
         {
           role: "user",
           content: JSON.stringify({
             task:
-              "提取会影响 2026 世界杯预测的球队近况信息。重点关注伤病、名单可用性、主帅变化、近期状态、赛程路径、资格赛背景和可信的市场移动新闻。只使用搜索结果中能支持的信息；没有可靠新信息时，请用中文明确说明“未找到足够可靠的新信息”。",
+              "提取会影响 2026 世界杯预测的球队近况信息。重点关注伤病、名单可用性、主帅变化、近期状态、赛程路径、资格赛背景和可信的市场移动新闻。只使用搜索结果中能支持的信息；没有可靠新信息时，请在中文和英文里都明确说明未找到足够可靠的新信息。",
             teams: inputs.map((input) => ({ slug: input.slug, teamName: input.teamName })),
             searchResults: searchResults.map((result) => ({
               title: result.title,
@@ -351,7 +351,7 @@ async function fetchDeepSeekResearch(
               teams: [
                 {
                   slug: "team-slug",
-                  deepseekResearch: "中文事实研究摘要，必须说明检索到的关键信息或未找到可靠新信息",
+                  deepseekResearch: "中文：中文事实研究摘要，说明检索到的关键信息或未找到可靠新信息。\nEnglish: English factual research note with the same meaning.",
                   sentiment: "positive|negative|neutral",
                   confidence: "low|medium|high",
                   sources: ["https://example.com/source"]
@@ -418,13 +418,13 @@ async function fetchGeminiSummaryAdjustments(
         {
           role: "system",
           content:
-            "You are Gemini, the final football forecasting calibration reviewer. Use DeepSeek research plus source snippets to summarize and set a tiny bounded adjustment. Do not invent sources. Return strict JSON. All user-facing summary and reason text must be Simplified Chinese; keep team names in English when needed."
+            "You are Gemini, the final football forecasting calibration reviewer. Use DeepSeek research plus source snippets to summarize and set a tiny bounded adjustment. Do not invent sources. Return strict JSON. Every user-facing summary and reason must contain both Simplified Chinese and English sections. Keep team names in English when needed."
         },
         {
           role: "user",
           content: JSON.stringify({
             task:
-              "复核 DeepSeek 的球队研究和原始搜索摘要，给出最终小幅概率修正、中文总结，以及为什么公允概率需要或不需要调整。没有可靠新信息时 adjustment 必须接近 0，并在中文总结里说明原因。",
+              "复核 DeepSeek 的球队研究和原始搜索摘要，给出最终小幅概率修正、双语总结，以及为什么公允概率需要或不需要调整。没有可靠新信息时 adjustment 必须接近 0，并在中文和英文总结里说明原因。",
             maxAdjustment,
             teams: inputs,
             deepseekResearch,
@@ -439,8 +439,8 @@ async function fetchGeminiSummaryAdjustments(
                 {
                   slug: "team-slug",
                   adjustment: 0,
-                  reason: "中文最终短理由，说明修正方向和证据强弱",
-                  gptSummary: "中文页面展示总结，包含最新信息、证据强弱和对公允概率的影响",
+                  reason: "中文：中文最终短理由，说明修正方向和证据强弱。\nEnglish: English final short reason with the same meaning.",
+                  gptSummary: "中文：中文页面展示总结，包含最新信息、证据强弱和对公允概率的影响。\nEnglish: English display summary with the same meaning.",
                   sources: ["https://example.com/source"]
                 }
               ]
@@ -449,7 +449,7 @@ async function fetchGeminiSummaryAdjustments(
               "Do not exceed maxAdjustment in either direction.",
               "Use 0 when evidence is weak, old, or unrelated.",
               "Most adjustments should be between -0.01 and +0.01.",
-              "All reason and gptSummary fields must be Simplified Chinese.",
+              "All reason and gptSummary fields must include both '中文：' and 'English:' sections.",
               "Return JSON only."
             ]
           })
@@ -654,7 +654,7 @@ function researchSystemPrompt() {
     "You must search the web for fresh, reliable information before producing adjustments.",
     "Use official team, federation, tournament, reputable sports-news, injury, lineup, and recent-form sources when available.",
     "Do not produce standalone win probabilities. Only suggest small calibration adjustments to the provided baseline model.",
-    "All display text in reason fields must be Simplified Chinese.",
+    "All display text in reason fields must include both Simplified Chinese and English sections.",
     "Return strict JSON only."
   ].join(" ");
 }
@@ -662,7 +662,7 @@ function researchSystemPrompt() {
 function researchUserPrompt(inputs: ProbabilityV2Input[], maxAdjustment: number) {
   return JSON.stringify({
     task:
-      "搜索 2026 FIFA World Cup 球队的最新公开信息，然后为每支球队建议一个有边界的小幅概率修正。考虑伤病、名单可用性、主帅变化、近期状态、赛程路径、资格赛背景和可信市场新闻。证据较弱或过旧时使用 0。reason 必须是中文。",
+      "搜索 2026 FIFA World Cup 球队的最新公开信息，然后为每支球队建议一个有边界的小幅概率修正。考虑伤病、名单可用性、主帅变化、近期状态、赛程路径、资格赛背景和可信市场新闻。证据较弱或过旧时使用 0。reason 必须同时包含中文和英文两个版本。",
     maxAdjustment,
     adjustmentMeaning:
       "A decimal probability-point delta added to CupEdge's baseline fair probability. Example: 0.01 means +1 percentage point.",
@@ -680,7 +680,7 @@ function researchUserPrompt(inputs: ProbabilityV2Input[], maxAdjustment: number)
           slug: "team-slug",
           adjustment: 0,
           confidence: "low|medium|high",
-          reason: "中文一句话，说明最相关证据和修正原因",
+          reason: "中文：中文一句话，说明最相关证据和修正原因。\nEnglish: English sentence with the same meaning.",
           sources: ["https://example.com/source"]
         }
       ]
@@ -690,7 +690,7 @@ function researchUserPrompt(inputs: ProbabilityV2Input[], maxAdjustment: number)
       "Prefer small adjustments: most teams should be between -0.01 and +0.01.",
       "Use 0 for teams without fresh, reliable evidence.",
       "Include source URLs in the reason or sources field.",
-      "Write reason in Simplified Chinese.",
+      "Write reason with both '中文：' and 'English:' sections.",
       "Return JSON only, without markdown."
     ]
   });

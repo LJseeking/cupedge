@@ -279,6 +279,11 @@ function UpcomingMatchCard({
   const hasMarketPrices = [match.homeProbability, match.drawProbability, match.awayProbability].some(
     (value) => value !== null && value !== undefined
   );
+  const edgeLabel = hasMarketPrices
+    ? "Edge"
+    : locale === "zh"
+      ? "模型 Edge"
+      : "Model Edge";
   const marketRows = [
     {
       label: match.homeTeam,
@@ -298,8 +303,12 @@ function UpcomingMatchCard({
   ];
   const fairProbabilityNote =
     locale === "zh"
-      ? "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；若未匹配到 Polymarket 盘口，只展示公允概率，不计算真实 Edge。"
-      : "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Without a matched Polymarket market, no live edge is calculated.";
+      ? hasMarketPrices
+        ? "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；Edge 为公允概率减去当前 Polymarket 市场价格。"
+        : "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；当前未匹配到 Polymarket 盘口，模型 Edge 显示相对三项均衡基准的倾斜度，不是可交易价差。"
+      : hasMarketPrices
+        ? "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Edge is fair probability minus the current Polymarket market price."
+        : "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Without a matched Polymarket market, Model Edge shows tilt versus an even three-way baseline, not a tradable spread.";
 
   return (
     <article className="rounded-lg border border-line bg-panel p-5">
@@ -335,15 +344,15 @@ function UpcomingMatchCard({
           <span>{locale === "zh" ? "结果" : "Outcome"}</span>
           <span>{locale === "zh" ? "市场" : "Market"}</span>
           <span>{locale === "zh" ? "公允" : "Fair"}</span>
-          <span>Edge</span>
+          <span>{edgeLabel}</span>
         </div>
         {marketRows.map((row) => (
           <div key={row.label} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 text-sm">
             <span className="truncate text-zinc-300">{row.label}</span>
             <span className="font-mono text-zinc-500">{formatOptionalPercent(row.market, locale)}</span>
             <span className="font-mono text-zinc-100">{percent(row.fair)}</span>
-            <span className={`font-mono ${edgeTone(edgeValue(row.fair, row.market))}`}>
-              {row.market === null || row.market === undefined ? "--" : signedPercent((row.fair ?? 0) - row.market)}
+            <span className={`font-mono ${edgeTone(edgeValue(row.fair, row.market, marketRows.length))}`}>
+              {signedPercent(edgeValue(row.fair, row.market, marketRows.length))}
             </span>
           </div>
         ))}
@@ -359,14 +368,18 @@ function UpcomingMatchCard({
               {locale === "zh" ? "DeepSeek 研究" : "DeepSeek Research"}
             </span>
             <br />
-            {match.deepseekResearch ?? (locale === "zh" ? "暂无摘要。" : "No summary yet.")}
+            <span className="whitespace-pre-line">
+              {formatBilingualSummary(match.deepseekResearch, "deepseek", locale)}
+            </span>
           </p>
           <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
             <span className="font-mono text-zinc-300">
               {locale === "zh" ? "Gemini 总结" : "Gemini Summary"}
             </span>
             <br />
-            {match.gptSummary ?? (locale === "zh" ? "暂无总结。" : "No summary yet.")}
+            <span className="whitespace-pre-line">
+              {formatBilingualSummary(match.gptSummary, "gemini", locale)}
+            </span>
           </p>
         </div>
       ) : null}
@@ -392,15 +405,34 @@ function formatOptionalPercent(value: number | null | undefined, locale: "zh" | 
   return percent(value);
 }
 
-function edgeValue(fair: number | null | undefined, market: number | null | undefined) {
-  if (fair === null || fair === undefined || market === null || market === undefined) return 0;
-  return fair - market;
+function edgeValue(fair: number | null | undefined, market: number | null | undefined, outcomeCount = 3) {
+  if (fair === null || fair === undefined) return 0;
+  if (market !== null && market !== undefined) return fair - market;
+  return fair - (1 / outcomeCount);
 }
 
 function edgeTone(value: number) {
   if (value >= 0.02) return "text-emerald-300";
   if (value <= -0.02) return "text-red-300";
   return "text-zinc-500";
+}
+
+function formatBilingualSummary(
+  value: string | null | undefined,
+  kind: "deepseek" | "gemini",
+  locale: "zh" | "en"
+) {
+  if (!value) return locale === "zh" ? "中文：暂无摘要。\nEnglish: No summary yet." : "English: No summary yet.\n中文：暂无摘要。";
+  const trimmed = value.trim();
+  if (hasBilingualMarkers(trimmed)) return trimmed;
+  const zhFallback = kind === "deepseek"
+    ? "中文：当前展示的是旧版英文研究摘要。部署新版本并重新触发 update-data 后，DeepSeek 会写入中文和英文两个版本。"
+    : "中文：当前展示的是旧版英文总结。部署新版本并重新触发 update-data 后，Gemini 会写入中文和英文两个版本。";
+  return `${zhFallback}\nEnglish: ${trimmed}`;
+}
+
+function hasBilingualMarkers(value: string) {
+  return /中文[:：]/.test(value) && /English\s*:/i.test(value);
 }
 
 function TopPickCard({

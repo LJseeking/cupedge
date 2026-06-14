@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, Radar, TrendingUp } from "lucide-react";
+import { BookOpen, ExternalLink, Radar, TrendingUp } from "lucide-react";
 import { Disclaimer } from "@/components/disclaimer";
 import { MetricCard } from "@/components/metric-card";
 import { dataQualityText, executionStatusText, OpportunityCard, signalText } from "@/components/opportunity-card";
@@ -198,7 +198,7 @@ function UpcomingMatchesSection({
         </span>
       </div>
       {matches.length ? (
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 xl:grid-cols-3">
           {matches.map((match) => (
             <UpcomingMatchCard key={match.matchSlug} match={match} locale={locale} />
           ))}
@@ -245,21 +245,28 @@ function UpcomingMatchCard({
       fair: match.fairAwayProbability
     }
   ];
+  const displayRows = marketRows.map((row) => ({
+    ...row,
+    edge: edgeValue(row.fair, row.market, marketRows.length)
+  }));
+  const bestEdgeRow = [...displayRows].sort((a, b) => b.edge - a.edge)[0];
+  const sourceCount = countResearchSources(match.researchSources);
   const fairProbabilityNote =
     locale === "zh"
       ? hasMarketPrices
-        ? "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；Edge 为公允概率减去当前 Polymarket 市场价格。"
-        : "公允概率由球队基础强度、当前估值模型和 LLM 小幅修正合成；当前未匹配到 Polymarket 盘口，模型 Edge 显示相对三项均衡基准的倾斜度，不是可交易价差。"
+        ? "Edge = CupEdge 公允概率 - Polymarket 价格。先看正 Edge，再看模型解释是否支持。"
+        : "当前未匹配到 Polymarket 盘口，只显示 CupEdge 公允概率和模型倾斜度。"
       : hasMarketPrices
-        ? "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Edge is fair probability minus the current Polymarket market price."
-        : "Fair probability combines team strength, the valuation model, and a small LLM adjustment. Without a matched Polymarket market, Model Edge shows tilt versus an even three-way baseline, not a tradable spread.";
+        ? "Edge = CupEdge fair probability minus Polymarket price. Check positive edge first, then model support."
+        : "No matched Polymarket market yet. This only shows CupEdge fair probability and model tilt.";
 
   return (
-    <article className="rounded-lg border border-line bg-panel p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+    <article className="overflow-hidden rounded-lg border border-line bg-panel">
+      <div className="border-b border-line bg-zinc-950/30 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
           <p className="text-xs uppercase tracking-wide text-zinc-600">{time}</p>
-          <h3 className="mt-2 text-xl font-semibold text-zinc-100">
+          <h3 className="mt-2 truncate text-xl font-semibold text-zinc-100">
             {match.homeTeam} vs {match.awayTeam}
           </h3>
           {match.marketSourceUrl ? (
@@ -267,67 +274,122 @@ function UpcomingMatchCard({
               href={match.marketSourceUrl}
               target="_blank"
               rel="noreferrer"
-              className="mt-2 inline-flex text-xs text-zinc-500 hover:text-zinc-200"
+              className="mt-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-200"
             >
               {hasMarketPrices ? "Polymarket" : locale === "zh" ? "CCTV 官方赛程" : "Official schedule"}
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
           ) : null}
         </div>
-        <div className="rounded border border-line bg-zinc-950 px-3 py-2 text-right">
+          <div className="shrink-0 rounded border border-line bg-zinc-950 px-3 py-2 text-right">
           <div className="text-xs uppercase tracking-wide text-zinc-600">
             {locale === "zh" ? "LLM 修正" : "LLM Adjustment"}
           </div>
           <div className="mt-1 font-mono text-sm font-semibold text-zinc-100">
             {signedPercent(match.llmAdjustment)}
           </div>
+          </div>
         </div>
       </div>
 
-      <div className="mt-5 space-y-3">
-        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] uppercase tracking-wide text-zinc-600">
-          <span>{locale === "zh" ? "结果" : "Outcome"}</span>
-          <span>{locale === "zh" ? "市场" : "Market"}</span>
-          <span>{locale === "zh" ? "公允" : "Fair"}</span>
-          <span>{edgeLabel}</span>
+      <div className="p-4">
+        <div className="mb-3 grid grid-cols-2 gap-3">
+          <div className="rounded border border-line bg-zinc-950/40 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-zinc-600">
+              {locale === "zh" ? "最佳差值" : "Best Edge"}
+            </div>
+            <div className={`mt-1 font-mono text-lg font-semibold ${edgeTone(bestEdgeRow?.edge ?? 0)}`}>
+              {signedPercent(bestEdgeRow?.edge ?? 0)}
+            </div>
+            <div className="mt-1 truncate text-xs text-zinc-500">{bestEdgeRow?.label}</div>
+          </div>
+          <div className="rounded border border-line bg-zinc-950/40 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-zinc-600">
+              {locale === "zh" ? "搜索来源" : "Sources"}
+            </div>
+            <div className="mt-1 font-mono text-lg font-semibold text-zinc-100">
+              {sourceCount || "—"}
+            </div>
+            <div className="mt-1 truncate text-xs text-zinc-500">
+              {hasMarketPrices
+                ? locale === "zh" ? "盘口已匹配" : "Market matched"
+                : locale === "zh" ? "盘口未匹配" : "Market unmatched"}
+            </div>
+          </div>
         </div>
-        {marketRows.map((row) => (
-          <div key={row.label} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 text-sm">
-            <span className="truncate text-zinc-300">{row.label}</span>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] uppercase tracking-wide text-zinc-600">
+            <span>{locale === "zh" ? "结果" : "Outcome"}</span>
+            <span>{locale === "zh" ? "市场" : "Market"}</span>
+            <span>{locale === "zh" ? "公允" : "Fair"}</span>
+            <span>{edgeLabel}</span>
+          </div>
+          {displayRows.map((row) => (
+            <div key={row.label} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 text-sm">
+            <span className="min-w-0 truncate text-zinc-300">{row.label}</span>
             <span className="font-mono text-zinc-500">{formatOptionalPercent(row.market, locale)}</span>
             <span className="font-mono text-zinc-100">{percent(row.fair)}</span>
-            <span className={`font-mono ${edgeTone(edgeValue(row.fair, row.market, marketRows.length))}`}>
-              {signedPercent(edgeValue(row.fair, row.market, marketRows.length))}
+            <span className={`font-mono ${edgeTone(row.edge)}`}>
+              {signedPercent(row.edge)}
             </span>
-          </div>
-        ))}
-      </div>
-      <p className="mt-4 rounded border border-line bg-zinc-950/40 p-3 text-xs leading-5 text-zinc-500">
-        {fairProbabilityNote}
-      </p>
-
-      {(match.deepseekResearch || match.gptSummary) ? (
-        <div className="mt-5 grid gap-3 text-xs leading-5 lg:grid-cols-2">
-          <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
-            <span className="font-mono text-zinc-300">
-              {locale === "zh" ? "DeepSeek 研究" : "DeepSeek Research"}
-            </span>
-            <br />
-            <span className="whitespace-pre-line">
-              {formatBilingualSummary(match.deepseekResearch, "deepseek", locale)}
-            </span>
-          </p>
-          <p className="rounded border border-line bg-zinc-950/40 p-3 text-zinc-400">
-            <span className="font-mono text-zinc-300">
-              {locale === "zh" ? "Gemini 总结" : "Gemini Summary"}
-            </span>
-            <br />
-            <span className="whitespace-pre-line">
-              {formatBilingualSummary(match.gptSummary, "gemini", locale)}
-            </span>
-          </p>
+            </div>
+          ))}
         </div>
-      ) : null}
+        <p className="mt-3 border-t border-line pt-3 text-xs leading-5 text-zinc-500">
+        {fairProbabilityNote}
+        </p>
+
+        {(match.deepseekResearch || match.gptSummary) ? (
+          <div className="mt-4 rounded border border-line bg-zinc-950/40">
+            <div className="grid gap-0 sm:grid-cols-2">
+              <ResearchPreview
+                title={locale === "zh" ? "DeepSeek 要点" : "DeepSeek Notes"}
+                value={match.deepseekResearch}
+                kind="deepseek"
+                locale={locale}
+              />
+              <ResearchPreview
+                title={locale === "zh" ? "Gemini 判断" : "Gemini View"}
+                value={match.gptSummary}
+                kind="gemini"
+                locale={locale}
+              />
+            </div>
+            <details className="border-t border-line px-3 py-2 text-xs text-zinc-500">
+              <summary className="cursor-pointer select-none font-mono text-zinc-400">
+                {locale === "zh" ? "展开完整中英研究" : "Show full bilingual research"}
+              </summary>
+              <div className="mt-3 grid gap-3 leading-5 sm:grid-cols-2">
+                <p className="whitespace-pre-line">{formatBilingualSummary(match.deepseekResearch, "deepseek", locale)}</p>
+                <p className="whitespace-pre-line">{formatBilingualSummary(match.gptSummary, "gemini", locale)}</p>
+              </div>
+            </details>
+          </div>
+        ) : null}
+      </div>
     </article>
+  );
+}
+
+function ResearchPreview({
+  title,
+  value,
+  kind,
+  locale
+}: {
+  title: string;
+  value: string | null | undefined;
+  kind: "deepseek" | "gemini";
+  locale: "zh" | "en";
+}) {
+  return (
+    <div className="min-h-[104px] border-b border-line p-3 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <div className="font-mono text-xs text-zinc-300">{title}</div>
+      <p className="mt-2 line-clamp-3 text-xs leading-5 text-zinc-500">
+        {compactResearchSummary(value, kind, locale)}
+      </p>
+    </div>
   );
 }
 
@@ -377,6 +439,47 @@ function formatBilingualSummary(
 
 function hasBilingualMarkers(value: string) {
   return /中文[:：]/.test(value) && /English\s*:/i.test(value);
+}
+
+function compactResearchSummary(
+  value: string | null | undefined,
+  kind: "deepseek" | "gemini",
+  locale: "zh" | "en"
+) {
+  const summary = formatBilingualSummary(value, kind, locale);
+  const localized = locale === "zh" ? extractChineseSection(summary) : extractEnglishSection(summary);
+  return trimToSentence(localized || summary, locale === "zh" ? 96 : 120);
+}
+
+function extractChineseSection(value: string) {
+  const match = value.match(/中文[:：]\s*([\s\S]*?)(?:English\s*:|$)/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractEnglishSection(value: string) {
+  const match = value.match(/English\s*:\s*([\s\S]*)/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function trimToSentence(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).replace(/[，,。.\s]+$/u, "")}…`;
+}
+
+function countResearchSources(value: string | null | undefined) {
+  if (!value) return 0;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.length;
+    if (Array.isArray(parsed?.sources)) return parsed.sources.length;
+  } catch {
+    return value
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean).length;
+  }
+  return 0;
 }
 
 function TopPickCard({

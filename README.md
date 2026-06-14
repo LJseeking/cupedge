@@ -123,6 +123,10 @@ RESEARCH_SEARCH_MAX_RESULTS="5"
 RESEARCH_SEARCH_TOTAL_MAX_RESULTS="20"
 RESEARCH_SEARCH_TOPIC="news"
 RESEARCH_SEARCH_DEPTH="basic"
+UPCOMING_MATCH_RESEARCH_ENABLED="true"
+UPCOMING_MATCH_SEARCH_MAX_RESULTS="4"
+UPCOMING_MATCH_SEARCH_TOTAL_MAX_RESULTS="10"
+UPCOMING_MATCH_LLM_ADJUSTMENT_MAX_ABS="0.03"
 LLM_ADJUSTMENT_MAX_ABS="0.03"
 LLM_ADJUSTMENT_TIMEOUT_MS="25000"
 LLM_RESEARCH_TIMEOUT_MS="90000"
@@ -164,6 +168,8 @@ Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the sc
 CupEdge Probability v2 blends market consensus, quant simulation, and an optional bounded LLM adjustment. LLM adjustment is off by default. To enable non-search adjustment, set `LLM_ADJUSTMENT_ENABLED="true"`, provide `LLM_API_KEY`, and set `LLM_MODELS` to a comma-separated list of chat-completion model names. To make the model search fresh web information during each update, also set `LLM_RESEARCH_ENABLED="true"` and choose `LLM_PROVIDER="openai"` or `LLM_PROVIDER="anthropic"`.
 
 For the low-cost research pipeline, set `LLM_RESEARCH_PIPELINE="tavily-deepseek-gemini"`. Tavily performs web search, DeepSeek extracts team-specific research notes, and Gemini produces the final display summary plus bounded probability adjustment. Each model can only suggest a small calibration delta, capped by `LLM_ADJUSTMENT_MAX_ABS` and defaulting to +/-3 percentage points.
+
+Upcoming-match cards run a separate fixture-level research pass when `LLM_RESEARCH_ENABLED="true"` and `UPCOMING_MATCH_RESEARCH_ENABLED` is not set to `false`. For each official CCTV fixture, CupEdge searches current match news with Tavily, asks DeepSeek to extract injury/lineup/recent-form factors, then asks Gemini to summarize and apply a small home-vs-away fair-probability adjustment.
 
 The Odds API requires `THE_ODDS_API_KEY`. Polymarket market data does not require an API key.
 
@@ -353,6 +359,10 @@ RESEARCH_SEARCH_MAX_RESULTS="5"
 RESEARCH_SEARCH_TOTAL_MAX_RESULTS="20"
 RESEARCH_SEARCH_TOPIC="news"
 RESEARCH_SEARCH_DEPTH="basic"
+UPCOMING_MATCH_RESEARCH_ENABLED="true"
+UPCOMING_MATCH_SEARCH_MAX_RESULTS="4"
+UPCOMING_MATCH_SEARCH_TOTAL_MAX_RESULTS="10"
+UPCOMING_MATCH_LLM_ADJUSTMENT_MAX_ABS="0.03"
 LLM_ADJUSTMENT_MAX_ABS="0.03"
 LLM_ADJUSTMENT_TIMEOUT_MS="25000"
 LLM_RESEARCH_TIMEOUT_MS="90000"

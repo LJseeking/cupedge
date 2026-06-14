@@ -16,6 +16,25 @@ type CctvGame = {
   homeName?: string;
   guestName?: string;
 };
+type TavilySearchResult = {
+  title?: string;
+  url?: string;
+  content?: string;
+  published_date?: string;
+};
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+type MatchResearchPayload = {
+  deepseekResearch?: string;
+  gptSummary?: string;
+  llmAdjustment?: number;
+  researchSources?: string;
+};
 
 const DEFAULT_UPCOMING_MATCH_LIMIT = 3;
 const POLYMARKET_BASE = "https://gamma-api.polymarket.com";
@@ -139,7 +158,9 @@ export async function refreshUpcomingMatches() {
   const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
   const valuations = await getCurrentValuations();
   const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
-  const enriched = matches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug));
+  const enriched = await refreshUpcomingMatchResearch(
+    matches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug))
+  );
 
   if (!enriched.length) return [];
 
@@ -496,6 +517,238 @@ function enrichMatchFairProbabilities(
   };
 }
 
+async function refreshUpcomingMatchResearch(matches: UpcomingMatch[]) {
+  if (!isMatchResearchEnabled()) return matches;
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.LLM_SUMMARY_API_KEY;
+  if (!tavilyKey || !deepseekKey) {
+    console.warn("Upcoming match research skipped because Tavily or DeepSeek key is missing.");
+    return matches;
+  }
+
+  const results: UpcomingMatch[] = [];
+  for (const match of matches) {
+    try {
+      const searchResults = await fetchMatchSearchResults(match, tavilyKey);
+      if (!searchResults.length) {
+        results.push(match);
+        continue;
+      }
+      const deepseek = await fetchMatchDeepSeekResearch(match, searchResults, deepseekKey);
+      let research = deepseek;
+      if (geminiKey) {
+        try {
+          research = await fetchMatchGeminiSummary(match, searchResults, deepseek, geminiKey);
+        } catch (error) {
+          console.warn(`Gemini match summary failed for ${match.homeTeam} vs ${match.awayTeam}. Continuing with DeepSeek only.`, error);
+        }
+      }
+      results.push(applyMatchResearch(match, research));
+    } catch (error) {
+      console.warn(`Upcoming match research failed for ${match.homeTeam} vs ${match.awayTeam}.`, error);
+      results.push(match);
+    }
+  }
+  return results;
+}
+
+function isMatchResearchEnabled() {
+  return (process.env.LLM_RESEARCH_ENABLED ?? "false").toLowerCase() === "true" &&
+    (process.env.UPCOMING_MATCH_RESEARCH_ENABLED ?? "true").toLowerCase() !== "false";
+}
+
+async function fetchMatchSearchResults(match: UpcomingMatch, apiKey: string): Promise<TavilySearchResult[]> {
+  const queries = buildMatchResearchQueries(match);
+  const maxResults = parsePositiveInteger(process.env.UPCOMING_MATCH_SEARCH_MAX_RESULTS, 4);
+  const settled = await Promise.allSettled(
+    queries.map((query) =>
+      fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          query,
+          topic: process.env.RESEARCH_SEARCH_TOPIC || "news",
+          search_depth: process.env.RESEARCH_SEARCH_DEPTH || "basic",
+          max_results: maxResults,
+          include_answer: true,
+          include_raw_content: false
+        }),
+        signal: AbortSignal.timeout(Number(process.env.RESEARCH_SEARCH_TIMEOUT_MS ?? "30000"))
+      }).then(async (response) => {
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`Tavily match search returned ${response.status}: ${body.slice(0, 300)}`);
+        }
+        return response.json() as Promise<{ results?: TavilySearchResult[] }>;
+      })
+    )
+  );
+
+  const seen = new Set<string>();
+  const results: TavilySearchResult[] = [];
+  for (const result of settled) {
+    if (result.status !== "fulfilled") {
+      console.warn("Tavily upcoming match query failed.", result.reason);
+      continue;
+    }
+    for (const item of result.value.results ?? []) {
+      if (!item.url || seen.has(item.url)) continue;
+      seen.add(item.url);
+      results.push(item);
+    }
+  }
+  return results.slice(0, parsePositiveInteger(process.env.UPCOMING_MATCH_SEARCH_TOTAL_MAX_RESULTS, 10));
+}
+
+function buildMatchResearchQueries(match: UpcomingMatch) {
+  const date = formatMatchDateForQuery(match.startTime);
+  const fixture = `${match.homeTeam} vs ${match.awayTeam}`;
+  return [
+    `${fixture} ${date} latest team news injuries lineup World Cup`,
+    `${match.homeTeam} ${match.awayTeam} ${date} preview injury suspension starting lineup`,
+    `${fixture} Polymarket odds latest news`
+  ];
+}
+
+async function fetchMatchDeepSeekResearch(
+  match: UpcomingMatch,
+  searchResults: TavilySearchResult[],
+  apiKey: string
+): Promise<MatchResearchPayload> {
+  const response = await fetch(`${getDeepSeekBase()}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You extract current football match intelligence from web search snippets. Do not invent facts. Return strict JSON. All display text must include both '中文：' and 'English:' sections."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            task:
+              "针对这场具体比赛提取最新赛前信息：伤停、停赛、首发/轮换、近期赛果、赛程动机、天气/场地、盘口或市场变化。只使用给定搜索结果；如果没有可信新消息，请说明已搜索但未找到可靠更新。",
+            match: matchResearchContext(match),
+            searchResults: searchResults.map(searchResultForPrompt),
+            outputShape: {
+              deepseekResearch:
+                "中文：列出这场比赛的最新信息、证据强弱，以及对主胜/平/客胜的方向影响。\nEnglish: Same meaning in English.",
+              sources: ["https://example.com/source"]
+            }
+          })
+        }
+      ]
+    }),
+    signal: AbortSignal.timeout(Number(process.env.DEEPSEEK_RESEARCH_TIMEOUT_MS ?? "90000"))
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`DeepSeek match research returned ${response.status}: ${body.slice(0, 500)}`);
+  }
+  const data = (await response.json()) as ChatCompletionResponse;
+  const payload = safeParseObject(data.choices?.[0]?.message?.content ?? "");
+  return {
+    deepseekResearch: typeof payload.deepseekResearch === "string" ? payload.deepseekResearch.slice(0, 1400) : undefined,
+    researchSources: stringifySources(payload.sources)
+  };
+}
+
+async function fetchMatchGeminiSummary(
+  match: UpcomingMatch,
+  searchResults: TavilySearchResult[],
+  deepseek: MatchResearchPayload,
+  apiKey: string
+): Promise<MatchResearchPayload> {
+  const maxAdjustment = getMatchLlmMaxAdjustment();
+  const response = await fetch(`${getGeminiBase()}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.GEMINI_SUMMARY_MODEL || process.env.LLM_SUMMARY_MODEL || "gemini-2.5-flash",
+      temperature: 0.1,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a final match forecasting reviewer. Use search snippets and DeepSeek research to produce a bilingual display summary and a small home-vs-away fair-probability adjustment. Return strict JSON only."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            task:
+              "复核这场比赛的最新消息，解释它如何影响公允概率。adjustment 是加到主队胜率、同时从客队胜率扣除的十进制概率；证据弱时必须为 0 或接近 0。",
+            maxAdjustment,
+            match: matchResearchContext(match),
+            deepseekResearch: deepseek.deepseekResearch,
+            searchResults: searchResults.map(searchResultForPrompt),
+            outputShape: {
+              gptSummary:
+                "中文：最新消息摘要、证据强弱、对主胜/平/客胜公允概率的影响。\nEnglish: Same meaning in English.",
+              adjustment: 0,
+              reason: "中文：调整原因。\nEnglish: Same meaning in English.",
+              sources: ["https://example.com/source"]
+            },
+            rules: [
+              "Do not exceed maxAdjustment in either direction.",
+              "Use 0 if there is no strong current evidence.",
+              "Do not invent injuries, lineups, or results.",
+              "Return JSON only."
+            ]
+          })
+        }
+      ]
+    }),
+    signal: AbortSignal.timeout(Number(process.env.GEMINI_SUMMARY_TIMEOUT_MS ?? "90000"))
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Gemini match summary returned ${response.status}: ${body.slice(0, 500)}`);
+  }
+  const data = (await response.json()) as ChatCompletionResponse;
+  const payload = safeParseObject(data.choices?.[0]?.message?.content ?? "");
+  return {
+    deepseekResearch: deepseek.deepseekResearch,
+    gptSummary: typeof payload.gptSummary === "string" ? payload.gptSummary.slice(0, 1400) : undefined,
+    llmAdjustment: boundMatchLlmAdjustment(Number(payload.adjustment ?? 0)),
+    researchSources: mergeSources([deepseek.researchSources, stringifySources(payload.sources)])
+  };
+}
+
+function applyMatchResearch(match: UpcomingMatch, research: MatchResearchPayload): UpcomingMatch {
+  const llmAdjustment = boundMatchLlmAdjustment(research.llmAdjustment ?? match.llmAdjustment ?? 0);
+  const fairHome = clampProbability((match.fairHomeProbability ?? 0) + llmAdjustment);
+  const fairAway = clampProbability((match.fairAwayProbability ?? 0) - llmAdjustment);
+  const fairDraw = clampProbability(match.fairDrawProbability ?? 0);
+  const total = fairHome + fairDraw + fairAway;
+  return {
+    ...match,
+    fairHomeProbability: total > 0 ? fairHome / total : match.fairHomeProbability,
+    fairDrawProbability: total > 0 ? fairDraw / total : match.fairDrawProbability,
+    fairAwayProbability: total > 0 ? fairAway / total : match.fairAwayProbability,
+    llmAdjustment,
+    deepseekResearch: research.deepseekResearch ?? match.deepseekResearch,
+    gptSummary: research.gptSummary ?? match.gptSummary,
+    researchSources: mergeSources([research.researchSources, match.researchSources])
+  };
+}
+
 function parseTeamsFromTitle(title: string, slug: string) {
   const normalized = title.replace(/\s+/g, " ").trim();
   const vsMatch = normalized.match(/^(.+?)\s+(?:vs\.?|v)\s+(.+?)(?:\s+Moneyline|\s+Winner|\?|$)/i);
@@ -780,4 +1033,107 @@ function parseList(value: string | undefined) {
 function parsePositiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function matchResearchContext(match: UpcomingMatch) {
+  return {
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    startTimeBeijing: formatMatchDateForQuery(match.startTime),
+    polymarket: {
+      home: match.homeProbability,
+      draw: match.drawProbability,
+      away: match.awayProbability,
+      sourceUrl: match.marketSourceUrl
+    },
+    cupedgeFair: {
+      home: match.fairHomeProbability,
+      draw: match.fairDrawProbability,
+      away: match.fairAwayProbability
+    }
+  };
+}
+
+function searchResultForPrompt(result: TavilySearchResult) {
+  return {
+    title: result.title,
+    url: result.url,
+    content: result.content,
+    publishedDate: result.published_date
+  };
+}
+
+function formatMatchDateForQuery(value: Date | string | null | undefined) {
+  const date = normalizeDate(value);
+  if (!date) return "upcoming";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function getDeepSeekBase() {
+  return (process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com").replace(/\/$/, "");
+}
+
+function getGeminiBase() {
+  return normalizeOpenAiCompatibleBase(
+    process.env.GEMINI_API_BASE ||
+      process.env.LLM_SUMMARY_API_BASE ||
+      "https://platform.powermatrix.tech"
+  );
+}
+
+function normalizeOpenAiCompatibleBase(value: string) {
+  const trimmed = value.replace(/\/$/, "");
+  try {
+    const url = new URL(trimmed);
+    if (!url.pathname || url.pathname === "/") {
+      url.pathname = "/v1";
+      return url.toString().replace(/\/$/, "");
+    }
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function safeParseObject(content: string): Record<string, unknown> {
+  if (!content) return {};
+  try {
+    const parsed = JSON.parse(content);
+    return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {};
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return {};
+    try {
+      const parsed = JSON.parse(match[0]);
+      return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+}
+
+function stringifySources(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const sources = value
+    .filter((source): source is string => typeof source === "string")
+    .slice(0, 5);
+  return sources.length ? sources.join("\n") : undefined;
+}
+
+function getMatchLlmMaxAdjustment() {
+  const value = Number(process.env.UPCOMING_MATCH_LLM_ADJUSTMENT_MAX_ABS ?? process.env.LLM_ADJUSTMENT_MAX_ABS ?? "0.03");
+  return Number.isFinite(value) && value > 0 ? value : 0.03;
+}
+
+function boundMatchLlmAdjustment(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  const max = getMatchLlmMaxAdjustment();
+  return Math.min(max, Math.max(-max, value));
 }

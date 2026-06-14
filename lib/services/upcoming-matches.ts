@@ -21,6 +21,56 @@ const DEFAULT_UPCOMING_MATCH_LIMIT = 3;
 const POLYMARKET_BASE = "https://gamma-api.polymarket.com";
 const CCTV_SCHEDULE_BASE = "https://cbs-u.sports.cctv.com/pc";
 const CCTV_SCHEDULE_PAGE = "https://worldcup.cctv.com/2026/schedule/index.shtml";
+const MARKET_SLUG_CODES: Record<string, string[]> = {
+  "mexico": ["mex"],
+  "south-africa": ["zaf", "rsa"],
+  "south-korea": ["kor"],
+  "czechia": ["cze", "czh"],
+  "canada": ["can"],
+  "bosnia-and-herzegovina": ["bih"],
+  "qatar": ["qat"],
+  "switzerland": ["che", "sui"],
+  "brazil": ["bra"],
+  "morocco": ["mar"],
+  "haiti": ["hti"],
+  "scotland": ["sco"],
+  "united-states": ["usa"],
+  "paraguay": ["pry", "par"],
+  "australia": ["aus"],
+  "turkey": ["tur"],
+  "germany": ["deu", "ger"],
+  "curacao": ["cuw", "cur"],
+  "ivory-coast": ["civ"],
+  "ecuador": ["ecu"],
+  "netherlands": ["nld", "ned"],
+  "japan": ["jpn"],
+  "sweden": ["swe"],
+  "tunisia": ["tun"],
+  "belgium": ["bel"],
+  "egypt": ["egy"],
+  "iran": ["irn"],
+  "new-zealand": ["nzl"],
+  "spain": ["esp"],
+  "cape-verde": ["cpv"],
+  "saudi-arabia": ["sau"],
+  "uruguay": ["ury", "uru"],
+  "france": ["fra"],
+  "senegal": ["sen"],
+  "iraq": ["irq"],
+  "norway": ["nor"],
+  "argentina": ["arg"],
+  "algeria": ["dza", "alg"],
+  "austria": ["aut"],
+  "jordan": ["jor"],
+  "portugal": ["prt", "por"],
+  "dr-congo": ["cod", "drc"],
+  "uzbekistan": ["uzb"],
+  "colombia": ["col"],
+  "england": ["eng"],
+  "croatia": ["hrv", "cro"],
+  "ghana": ["gha"],
+  "panama": ["pan"]
+};
 const CCTV_TEAM_NAME_MAP: Record<string, string> = {
   "墨西哥": "Mexico",
   "南非": "South Africa",
@@ -75,7 +125,7 @@ const CCTV_TEAM_NAME_MAP: Record<string, string> = {
 export async function refreshUpcomingMatches() {
   const limit = parsePositiveInteger(process.env.UPCOMING_MATCH_LIMIT, DEFAULT_UPCOMING_MATCH_LIMIT);
   const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
-  const polymarketMatches = await fetchUpcomingMatchesFromPolymarket();
+  const polymarketMatches = await fetchUpcomingMatchesFromPolymarket(officialMatches);
   const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
   const valuations = await getCurrentValuations();
   const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
@@ -188,16 +238,35 @@ async function fetchUpcomingMatchesFromCctv(limit: number): Promise<UpcomingMatc
   }
 }
 
-async function fetchUpcomingMatchesFromPolymarket(): Promise<UpcomingMatch[]> {
+async function fetchUpcomingMatchesFromPolymarket(officialMatches: UpcomingMatch[] = []): Promise<UpcomingMatch[]> {
   const base = (process.env.POLYMARKET_API_BASE || POLYMARKET_BASE).replace(/\/$/, "");
   const slugs = parseList(process.env.UPCOMING_MATCH_SLUGS);
-  const matchSlugs = slugs.length ? slugs : [];
   const matches: UpcomingMatch[] = [];
+  const seen = new Set<string>();
 
-  for (const slug of matchSlugs) {
+  for (const slug of slugs) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
     const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
     const parsed = parseMatchFromGamma(slug, rows);
     if (parsed) matches.push(parsed);
+  }
+
+  for (const official of officialMatches) {
+    if (matches.some((match) => isSameFixture(match, official))) continue;
+    for (const slug of buildPolymarketSlugCandidates(official)) {
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
+      const parsed = parseMatchFromGamma(slug, rows, official);
+      if (parsed) {
+        matches.push(parsed);
+        break;
+      }
+    }
+    if (matches.some((match) => isSameFixture(match, official))) continue;
+    const searched = await fetchPolymarketMatchBySearch(base, official);
+    if (searched) matches.push(searched);
   }
 
   return matches;
@@ -288,18 +357,65 @@ async function fetchGammaRows(url: string) {
   }
 }
 
-function parseMatchFromGamma(matchSlug: string, rows: GammaRow[]): UpcomingMatch | null {
+async function fetchPolymarketMatchBySearch(base: string, official: UpcomingMatch) {
+  const queries = [
+    `${official.homeTeam} ${official.awayTeam}`,
+    `${official.homeTeam} vs ${official.awayTeam}`,
+    `${official.homeTeam} ${official.awayTeam} World Cup`
+  ];
+  for (const query of queries) {
+    const params = new URLSearchParams({
+      active: "true",
+      closed: "false",
+      limit: "25",
+      search: query
+    });
+    const rows = await fetchGammaRows(`${base}/events?${params.toString()}`);
+    const parsed = parseMatchFromGamma(`search-${teamSlugFromName(official.homeTeam)}-${teamSlugFromName(official.awayTeam)}`, rows, official);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parseMatchFromGamma(matchSlug: string, rows: GammaRow[], expected?: UpcomingMatch): UpcomingMatch | null {
   const row = rows[0];
   if (!row) return null;
-  const market = parseMaybeJsonArray(row.markets).find((item) => typeof item === "object" && item !== null) as GammaRow | undefined;
-  const source = market ?? row;
+  const candidates = rows.flatMap((candidate) => {
+    const markets = parseMaybeJsonArray(candidate.markets)
+      .filter((item): item is GammaRow => typeof item === "object" && item !== null)
+      .map((market) => ({
+        ...market,
+        eventSlug: candidate.slug,
+        eventTitle: candidate.title ?? candidate.question,
+        eventStartDate: candidate.startDate ?? candidate.startTime ?? candidate.endDate
+      }));
+    return markets.length ? markets : [candidate];
+  });
+  const source = candidates
+    .map((candidate) => ({
+      candidate,
+      parsed: parseGammaMatchCandidate(matchSlug, candidate, row, expected)
+    }))
+    .find((item) => item.parsed)?.parsed;
+  return source ?? null;
+}
+
+function parseGammaMatchCandidate(matchSlug: string, source: GammaRow, row: GammaRow, expected?: UpcomingMatch): UpcomingMatch | null {
   const title = String(source.question ?? source.title ?? row.title ?? row.question ?? matchSlug);
-  const teams = parseTeamsFromTitle(title, matchSlug);
+  const teams = expected ? {
+    homeTeam: expected.homeTeam,
+    awayTeam: expected.awayTeam,
+    homeTeamSlug: expected.homeTeamSlug ?? teamSlugFromName(expected.homeTeam),
+    awayTeamSlug: expected.awayTeamSlug ?? teamSlugFromName(expected.awayTeam)
+  } : parseTeamsFromTitle(title, matchSlug);
   if (!teams) return null;
+  if (expected && !textLooksLikeFixture(source, expected)) return null;
   const outcomes = parseMaybeJsonArray(source.outcomes).map(String);
   const prices = parseMaybeJsonArray(source.outcomePrices).map(parseNumber);
   const probabilities = parseMoneylineProbabilities(outcomes, prices, teams);
-  const startTime = parseDate(source.startDate ?? row.startDate ?? source.endDate ?? row.endDate);
+  if (!hasMoneylinePrices(probabilities)) return null;
+  const startTime = parseDate(source.startDate ?? source.startTime ?? source.eventStartDate ?? row.startDate ?? row.startTime ?? source.endDate ?? row.endDate);
+  const eventSlug = String(source.eventSlug ?? row.slug ?? source.slug ?? matchSlug);
 
   return {
     matchSlug,
@@ -314,7 +430,7 @@ function parseMatchFromGamma(matchSlug: string, rows: GammaRow[]): UpcomingMatch
     drawProbability: probabilities.draw,
     awayProbability: probabilities.away,
     llmAdjustment: 0,
-    marketSourceUrl: `https://polymarket.com/zh/sports/world-cup/${matchSlug}`,
+    marketSourceUrl: eventSlug ? `https://polymarket.com/event/${eventSlug}` : `https://polymarket.com/search?q=${encodeURIComponent(`${teams.homeTeam} ${teams.awayTeam}`)}`,
     updatedAt: new Date()
   };
 }
@@ -394,6 +510,77 @@ function findOutcomePrice(outcomes: Map<string, number>, candidates: string[]) {
     if (candidates.some((candidate) => name.includes(candidate.toLowerCase()))) return price;
   }
   return undefined;
+}
+
+function hasMoneylinePrices(probabilities: { home?: number; draw?: number; away?: number }) {
+  return probabilities.home !== undefined &&
+    probabilities.draw !== undefined &&
+    probabilities.away !== undefined;
+}
+
+function textLooksLikeFixture(source: GammaRow, expected: UpcomingMatch) {
+  const text = [
+    source.question,
+    source.title,
+    source.eventTitle,
+    source.slug,
+    source.eventSlug
+  ].map((value) => String(value ?? "").toLowerCase()).join(" ");
+  const home = expected.homeTeam.toLowerCase();
+  const away = expected.awayTeam.toLowerCase();
+  const homeSlug = expected.homeTeamSlug ?? teamSlugFromName(expected.homeTeam);
+  const awaySlug = expected.awayTeamSlug ?? teamSlugFromName(expected.awayTeam);
+  const homeCodes = MARKET_SLUG_CODES[homeSlug] ?? [homeSlug.slice(0, 3)];
+  const awayCodes = MARKET_SLUG_CODES[awaySlug] ?? [awaySlug.slice(0, 3)];
+  const hasHome = text.includes(home) || homeCodes.some((code) => text.includes(code));
+  const hasAway = text.includes(away) || awayCodes.some((code) => text.includes(code));
+  return hasHome && hasAway;
+}
+
+function buildPolymarketSlugCandidates(match: UpcomingMatch) {
+  const homeSlug = match.homeTeamSlug ?? teamSlugFromName(match.homeTeam);
+  const awaySlug = match.awayTeamSlug ?? teamSlugFromName(match.awayTeam);
+  const homeCodes = MARKET_SLUG_CODES[homeSlug] ?? [homeSlug.slice(0, 3)];
+  const awayCodes = MARKET_SLUG_CODES[awaySlug] ?? [awaySlug.slice(0, 3)];
+  const dates = getPolymarketDateCandidates(match.startTime);
+  const slugs = new Set<string>();
+  for (const date of dates) {
+    for (const homeCode of homeCodes) {
+      for (const awayCode of awayCodes) {
+        slugs.add(`fifwc-${homeCode}-${awayCode}-${date}`);
+        slugs.add(`fifwc-${awayCode}-${homeCode}-${date}`);
+      }
+    }
+  }
+  return [...slugs];
+}
+
+function getPolymarketDateCandidates(value: Date | string | null | undefined) {
+  const date = normalizeDate(value);
+  if (!date) return [];
+  const candidates = new Set<string>();
+  candidates.add(date.toISOString().slice(0, 10));
+  candidates.add(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date));
+  candidates.add(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date));
+  return [...candidates];
+}
+
+function isSameFixture(a: UpcomingMatch, b: UpcomingMatch) {
+  const aHome = a.homeTeamSlug ?? teamSlugFromName(a.homeTeam);
+  const aAway = a.awayTeamSlug ?? teamSlugFromName(a.awayTeam);
+  const bHome = b.homeTeamSlug ?? teamSlugFromName(b.homeTeam);
+  const bAway = b.awayTeamSlug ?? teamSlugFromName(b.awayTeam);
+  return aHome === bHome && aAway === bAway;
 }
 
 function parseMaybeJsonArray(value: unknown): unknown[] {

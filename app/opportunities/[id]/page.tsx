@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Bell, History, LockKeyhole } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Disclaimer } from "@/components/disclaimer";
 import { dataQualityText, executionStatusText, marketTypeText } from "@/components/opportunity-card";
 import { ResearchInsightPanel } from "@/components/research-insight-panel";
 import { getLocale } from "@/lib/i18n-server";
 import { getOpportunityDetail } from "@/lib/services/opportunities";
-import { getOpportunityTrustTier, trustTierText } from "@/lib/services/opportunity-trust";
 import { getResearchInsightForOpportunity } from "@/lib/services/research-insights";
 import type { MarketOpportunity } from "@/lib/types/opportunity";
 import { percent, signedPercent } from "@/lib/utils";
@@ -22,7 +21,6 @@ export default async function OpportunityDetailPage({
   const { id } = await params;
   const opportunity = await getOpportunityDetail(id);
   if (!opportunity) notFound();
-  const trustTier = getOpportunityTrustTier(opportunity);
   const researchInsight = await getResearchInsightForOpportunity(opportunity);
 
   return (
@@ -47,10 +45,7 @@ export default async function OpportunityDetailPage({
           </p>
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-4">
-          <Metric label={locale === "zh" ? "可信层级" : "Trust Tier"} value={trustTierText(trustTier, locale)} />
-          <Metric label="Grade" value={opportunity.opportunityGrade} />
-          <Metric label={locale === "zh" ? "执行状态" : "Execution"} value={executionStatusText(opportunity.executionStatus, locale)} />
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Metric
             label={
               opportunity.priceSource === "LIVE_POLYMARKET"
@@ -68,13 +63,10 @@ export default async function OpportunityDetailPage({
             value={signedPercent(opportunity.fairProbability - opportunity.polymarketProbability)}
             tone={opportunity.fairProbability >= opportunity.polymarketProbability ? "positive" : "negative"}
           />
-          <Metric label="Action Score" value={String(Math.round(opportunity.actionableScore))} />
           <Metric label={locale === "zh" ? "观察价" : "Watch Below"} value={percent(opportunity.watchBelow)} />
           <Metric label={locale === "zh" ? "失效价" : "Invalid At"} value={percent(opportunity.invalidAt)} />
-          <Metric label={locale === "zh" ? "趋势" : "Signal Trend"} value={opportunity.signalTrend} />
+          <Metric label={locale === "zh" ? "执行状态" : "Execution"} value={executionStatusText(opportunity.executionStatus, locale)} />
           <Metric label={locale === "zh" ? "数据质量" : "Data Quality"} value={dataQualityText(opportunity.dataQuality, locale)} />
-          <Metric label="Price Source" value={opportunity.priceSource} />
-          <Metric label="Fair Source" value={opportunity.fairValueSource} />
         </div>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -118,36 +110,7 @@ export default async function OpportunityDetailPage({
           </section>
         </div>
 
-        <section className="mt-6 rounded-lg border border-line bg-panel p-5">
-          <h2 className="font-mono text-sm font-semibold uppercase tracking-wide text-zinc-300">
-            {locale === "zh" ? "保守风险暴露参考" : "Conservative Exposure Reference"}
-          </h2>
-          {opportunity.conservativeExposureMax && opportunity.conservativeExposureMax > 0 ? (
-            <p className="mt-3 text-sm leading-6 text-zinc-300">
-              {locale === "zh"
-                ? `参考风险暴露：账户资金的 ${percent(opportunity.conservativeExposureMin)}-${percent(
-                    opportunity.conservativeExposureMax
-                  )}。仅用于风险管理参考，不构成行动建议。`
-                : `Reference risk exposure: ${percent(opportunity.conservativeExposureMin)}-${percent(
-                    opportunity.conservativeExposureMax
-                  )} of account capital. This is only for risk management context, not advice.`}
-            </p>
-          ) : (
-            <p className="mt-3 text-sm leading-6 text-zinc-500">
-              {locale === "zh"
-                ? "信号不足，不显示仓位参考。"
-                : "Signal is insufficient, so no exposure reference is shown."}
-            </p>
-          )}
-        </section>
-
         <ResearchInsightPanel insight={researchInsight} locale={locale} />
-
-        <section className="mt-6 grid gap-3 sm:grid-cols-3">
-          <LockedLink icon="alert" label="Set Alert" />
-          <LockedLink icon="history" label="Unlock Signal History" />
-          <LockedLink icon="lock" label="Unlock Entry Zone" />
-        </section>
       </section>
       <Disclaimer locale={locale} />
     </main>
@@ -215,19 +178,6 @@ function AlertFit({ opportunity, locale }: { opportunity: MarketOpportunity; loc
           ? "Alert fit: suitable. This signal depends on price zone, so alerts can help monitor a move back into watch range."
           : "Alert fit: lower priority. The signal is near fair value, overheated, or has liquidity issues."}
     </p>
-  );
-}
-
-function LockedLink({ icon, label }: { icon: "alert" | "history" | "lock"; label: string }) {
-  const Icon = icon === "alert" ? Bell : icon === "history" ? History : LockKeyhole;
-  return (
-    <Link
-      href="/pricing"
-      className="inline-flex items-center justify-center gap-2 rounded border border-line bg-zinc-950 px-3 py-3 text-sm font-medium text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-100"
-    >
-      <Icon className="h-4 w-4" aria-hidden="true" />
-      {label}
-    </Link>
   );
 }
 

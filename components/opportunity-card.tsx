@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Bell, Gauge, History, Layers, LockKeyhole } from "lucide-react";
+import { ArrowRight, Gauge, Layers } from "lucide-react";
 import type { Locale } from "@/lib/i18n";
 import {
   getOpportunityTrustTier,
@@ -107,11 +107,6 @@ export function OpportunityCard({
               {locale === "zh" ? "完整分析" : "Full Analysis"}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </Link>
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <ProLink icon="alert" label={locale === "zh" ? "设置提醒" : "Set Alert"} />
-            <ProLink icon="lock" label={locale === "zh" ? "解锁观察价" : "Unlock Entry Zone"} />
-            <ProLink icon="history" label={locale === "zh" ? "查看历史" : "View Signal History"} />
           </div>
         </>
       ) : null}
@@ -299,8 +294,7 @@ function EntryZone({ opportunity, locale }: { opportunity: MarketOpportunity; lo
   ) {
     return (
       <div className="mt-4 rounded border border-line bg-zinc-950/40 p-3 text-xs leading-5 text-zinc-500">
-        <div className="mb-1 flex items-center gap-2 text-zinc-400">
-          <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+        <div className="mb-1 text-zinc-400">
           {locale === "zh" ? "观察价暂不开放" : "Entry zone unavailable"}
         </div>
         {locale === "zh"
@@ -350,8 +344,7 @@ function EntryZone({ opportunity, locale }: { opportunity: MarketOpportunity; lo
   return (
     <div className="mt-4 rounded border border-line bg-zinc-950/40 p-3 text-xs leading-5 text-zinc-400">
       <div className="mb-2 flex items-center gap-2 text-zinc-500">
-        <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
-        {locale === "zh" ? "Pro Entry Zone" : "Pro Entry Zone"}
+        {locale === "zh" ? "观察价区间" : "Entry Zone"}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-2">
         <span>
@@ -369,19 +362,6 @@ function EntryZone({ opportunity, locale }: { opportunity: MarketOpportunity; lo
           : `Still worth watching below ${percent(watchBelow)}; signal weakens near ${percent(invalidNear)}.`}
       </p>
     </div>
-  );
-}
-
-function ProLink({ icon, label }: { icon: "alert" | "lock" | "history"; label: string }) {
-  const Icon = icon === "alert" ? Bell : icon === "lock" ? LockKeyhole : History;
-  return (
-    <Link
-      href="/pricing"
-      className="inline-flex items-center justify-center gap-2 rounded border border-line bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-100"
-    >
-      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-      {label}
-    </Link>
   );
 }
 

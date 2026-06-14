@@ -1,4 +1,4 @@
-import { fetchJsonWithFallback } from "@/lib/data/http";
+import { fetchJsonWithFallback, fetchTextWithFallback } from "@/lib/data/http";
 import { findSeedTeamByName, findSeedTeamInText, teamSlugFromName } from "@/lib/data/teams";
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentValuations } from "@/lib/services/valuation";
@@ -39,7 +39,7 @@ const MARKET_SLUG_CODES: Record<string, string[]> = {
   "australia": ["aus"],
   "turkey": ["tur"],
   "germany": ["deu", "ger"],
-  "curacao": ["cuw", "cur"],
+  "curacao": ["kor", "cuw", "cur"],
   "ivory-coast": ["civ"],
   "ecuador": ["ecu"],
   "netherlands": ["nld", "ned"],
@@ -120,6 +120,16 @@ const CCTV_TEAM_NAME_MAP: Record<string, string> = {
   "克罗地亚": "Croatia",
   "加纳": "Ghana",
   "巴拿马": "Panama"
+};
+const MARKET_TEXT_ALIASES: Record<string, string[]> = {
+  "germany": ["Germany", "GER", "DEU"],
+  "curacao": ["Curacao", "Curaçao", "KOR"],
+  "netherlands": ["Netherlands", "NED", "NLD"],
+  "japan": ["Japan", "JPN"],
+  "ivory-coast": ["Ivory Coast", "Cote d'Ivoire", "Côte d'Ivoire", "d'Ivoire", "CIV"],
+  "ecuador": ["Ecuador", "ECU"],
+  "australia": ["Australia", "AUS"],
+  "turkey": ["Turkey", "TUR"]
 };
 
 export async function refreshUpcomingMatches() {
@@ -248,7 +258,8 @@ async function fetchUpcomingMatchesFromPolymarket(officialMatches: UpcomingMatch
     if (seen.has(slug)) continue;
     seen.add(slug);
     const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
-    const parsed = parseMatchFromGamma(slug, rows);
+    const parsed = parseMatchFromGamma(slug, rows) ??
+      await fetchPolymarketSportsPageMatch(slug);
     if (parsed) matches.push(parsed);
   }
 
@@ -258,7 +269,8 @@ async function fetchUpcomingMatchesFromPolymarket(officialMatches: UpcomingMatch
       if (seen.has(slug)) continue;
       seen.add(slug);
       const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
-      const parsed = parseMatchFromGamma(slug, rows, official);
+      const parsed = parseMatchFromGamma(slug, rows, official) ??
+        await fetchPolymarketSportsPageMatch(slug, official);
       if (parsed) {
         matches.push(parsed);
         break;
@@ -375,6 +387,20 @@ async function fetchPolymarketMatchBySearch(base: string, official: UpcomingMatc
     if (parsed) return parsed;
   }
   return null;
+}
+
+async function fetchPolymarketSportsPageMatch(slug: string, expected?: UpcomingMatch) {
+  const url = `https://polymarket.com/sports/world-cup/${slug}`;
+  try {
+    const html = await fetchTextWithFallback(url, 12_000);
+    if (!html) return null;
+    return parseSportsPageMatch(slug, url, html, expected);
+  } catch (error) {
+    if (process.env.CUPEDGE_POLYMARKET_DEBUG === "1") {
+      console.warn(`Polymarket sports page fetch failed for ${url}`, error);
+    }
+    return null;
+  }
 }
 
 function parseMatchFromGamma(matchSlug: string, rows: GammaRow[], expected?: UpcomingMatch): UpcomingMatch | null {
@@ -518,22 +544,99 @@ function hasMoneylinePrices(probabilities: { home?: number; draw?: number; away?
     probabilities.away !== undefined;
 }
 
+function parseSportsPageMatch(slug: string, url: string, html: string, expected?: UpcomingMatch): UpcomingMatch | null {
+  if (!expected) return null;
+  const text = htmlToText(html);
+  if (!textLooksLikeFixture({ title: text, slug }, expected)) return null;
+  const home = findSportsPageTeamPrice(text, expected.homeTeam, expected.homeTeamSlug ?? teamSlugFromName(expected.homeTeam));
+  const away = findSportsPageTeamPrice(text, expected.awayTeam, expected.awayTeamSlug ?? teamSlugFromName(expected.awayTeam));
+  const draw = findSportsPageDrawPrice(text);
+  const inferredDraw = home !== undefined && away !== undefined ? clampProbability(1 - home - away) : undefined;
+  const drawProbability = draw ?? (inferredDraw && inferredDraw > 0.005 ? inferredDraw : undefined);
+  if (home === undefined || away === undefined || drawProbability === undefined) return null;
+
+  return {
+    matchSlug: slug,
+    marketSlug: slug,
+    marketTitle: `${expected.homeTeam} vs ${expected.awayTeam}`,
+    homeTeam: expected.homeTeam,
+    awayTeam: expected.awayTeam,
+    homeTeamSlug: expected.homeTeamSlug,
+    awayTeamSlug: expected.awayTeamSlug,
+    startTime: expected.startTime,
+    homeProbability: home,
+    drawProbability,
+    awayProbability: away,
+    llmAdjustment: 0,
+    marketSourceUrl: url,
+    updatedAt: new Date()
+  };
+}
+
+function findSportsPageTeamPrice(text: string, teamName: string, teamSlug: string) {
+  const folded = foldText(text);
+  const aliases = [
+    teamName,
+    ...(MARKET_TEXT_ALIASES[teamSlug] ?? []),
+    ...(MARKET_SLUG_CODES[teamSlug] ?? []).map((code) => code.toUpperCase())
+  ].map(foldText);
+
+  for (const alias of aliases) {
+    const escaped = escapeRegex(alias);
+    const patterns = [
+      new RegExp(`${escaped}\\s+(?:is\\s+currently\\s+)?(?:priced\\s+)?at\\s+(\\d+(?:\\.\\d+)?)\\s*(?:¢|c|%)`, "i"),
+      new RegExp(`\\b${escaped}\\s+(\\d+(?:\\.\\d+)?)\\s*(?:¢|c|%)`, "i"),
+      new RegExp(`will\\s+${escaped}\\s+win[^?]*\\?\\s*yes\\s*(\\d+(?:\\.\\d+)?)\\s*%`, "i")
+    ];
+    for (const pattern of patterns) {
+      const matched = folded.match(pattern);
+      const parsed = parsePercentLike(matched?.[1]);
+      if (parsed !== undefined) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function findSportsPageDrawPrice(text: string) {
+  const folded = foldText(text);
+  const patterns = [
+    /\bdraw\s+(\d+(?:\.\d+)?)\s*(?:¢|c|%)/i,
+    /end\s+in\s+a\s+draw[^?]*\?\s*yes\s*(\d+(?:\.\d+)?)\s*%/i,
+    /draw[^.]{0,80}?at\s+(\d+(?:\.\d+)?)\s*(?:¢|c|%)/i
+  ];
+  for (const pattern of patterns) {
+    const matched = folded.match(pattern);
+    const parsed = parsePercentLike(matched?.[1]);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function parsePercentLike(value: string | undefined) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return clampProbability(parsed > 1 ? parsed / 100 : parsed);
+}
+
 function textLooksLikeFixture(source: GammaRow, expected: UpcomingMatch) {
-  const text = [
+  const text = foldText([
     source.question,
     source.title,
     source.eventTitle,
     source.slug,
     source.eventSlug
-  ].map((value) => String(value ?? "").toLowerCase()).join(" ");
-  const home = expected.homeTeam.toLowerCase();
-  const away = expected.awayTeam.toLowerCase();
+  ].map((value) => String(value ?? "")).join(" "));
+  const home = foldText(expected.homeTeam);
+  const away = foldText(expected.awayTeam);
   const homeSlug = expected.homeTeamSlug ?? teamSlugFromName(expected.homeTeam);
   const awaySlug = expected.awayTeamSlug ?? teamSlugFromName(expected.awayTeam);
   const homeCodes = MARKET_SLUG_CODES[homeSlug] ?? [homeSlug.slice(0, 3)];
   const awayCodes = MARKET_SLUG_CODES[awaySlug] ?? [awaySlug.slice(0, 3)];
-  const hasHome = text.includes(home) || homeCodes.some((code) => text.includes(code));
-  const hasAway = text.includes(away) || awayCodes.some((code) => text.includes(code));
+  const homeAliases = [home, ...(MARKET_TEXT_ALIASES[homeSlug] ?? []).map(foldText), ...homeCodes.map(foldText)];
+  const awayAliases = [away, ...(MARKET_TEXT_ALIASES[awaySlug] ?? []).map(foldText), ...awayCodes.map(foldText)];
+  const hasHome = homeAliases.some((alias) => text.includes(alias));
+  const hasAway = awayAliases.some((alias) => text.includes(alias));
   return hasHome && hasAway;
 }
 
@@ -592,6 +695,38 @@ function parseMaybeJsonArray(value: unknown): unknown[] {
   } catch {
     return [];
   }
+}
+
+function htmlToText(html: string) {
+  const withMetaContent = html.replace(/<meta[^>]+content=(["'])(.*?)\1[^>]*>/gi, " $2 ");
+  return decodeHtmlEntities(withMetaContent)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function foldText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’‘]/g, "'")
+    .toLowerCase();
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseNumber(value: unknown) {

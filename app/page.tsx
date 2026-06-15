@@ -88,7 +88,7 @@ function UpcomingMatchesSection({
           {locale === "zh" ? "Upcoming Matches / 即将开赛" : "Upcoming Matches"}
         </h2>
         <span className="text-xs text-zinc-500">
-          {locale === "zh" ? "CCTV 官方赛程 + CupEdge 公允概率" : "Official schedule + CupEdge fair probabilities"}
+          {locale === "zh" ? "Polymarket Games + CupEdge 公允概率" : "Polymarket games + CupEdge fair probabilities"}
         </span>
       </div>
       {matches.length ? (
@@ -169,7 +169,7 @@ function UpcomingMatchCard({
               rel="noreferrer"
               className="mt-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-200"
             >
-              {hasMarketPrices ? "Polymarket" : locale === "zh" ? "CCTV 官方赛程" : "Official schedule"}
+              {hasMarketPrices ? "Polymarket" : "Polymarket Games"}
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
           ) : null}

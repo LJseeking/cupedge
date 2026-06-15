@@ -11,16 +11,6 @@ import type { UpcomingMatch } from "@/lib/types/research";
 import { clampProbability } from "@/lib/utils";
 
 type GammaRow = Record<string, unknown>;
-type CctvGame = {
-  id?: number | string;
-  gameName?: string;
-  roundType?: string;
-  startTime?: string;
-  gameStatus?: number;
-  statusDesc?: string;
-  homeName?: string;
-  guestName?: string;
-};
 type TavilySearchResult = {
   title?: string;
   url?: string;
@@ -43,8 +33,8 @@ type MatchResearchPayload = {
 
 const DEFAULT_UPCOMING_MATCH_LIMIT = 3;
 const POLYMARKET_BASE = "https://gamma-api.polymarket.com";
-const CCTV_SCHEDULE_BASE = "https://cbs-u.sports.cctv.com/pc";
-const CCTV_SCHEDULE_PAGE = "https://worldcup.cctv.com/2026/schedule/index.shtml";
+const POLYMARKET_GAMES_PAGE =
+  process.env.POLYMARKET_GAMES_PAGE_URL || "https://polymarket.com/zh/sports/world-cup/games";
 const MARKET_SLUG_CODES: Record<string, string[]> = {
   "mexico": ["mex"],
   "south-africa": ["zaf", "rsa"],
@@ -75,7 +65,7 @@ const MARKET_SLUG_CODES: Record<string, string[]> = {
   "iran": ["irn"],
   "new-zealand": ["nzl"],
   "spain": ["esp", "spa"],
-  "cape-verde": ["cpv", "cve", "cv"],
+  "cape-verde": ["cvi", "cpv", "cve", "cv"],
   "saudi-arabia": ["sau"],
   "uruguay": ["ury", "uru"],
   "france": ["fra"],
@@ -95,56 +85,6 @@ const MARKET_SLUG_CODES: Record<string, string[]> = {
   "ghana": ["gha"],
   "panama": ["pan"]
 };
-const CCTV_TEAM_NAME_MAP: Record<string, string> = {
-  "墨西哥": "Mexico",
-  "南非": "South Africa",
-  "韩国": "South Korea",
-  "捷克": "Czechia",
-  "加拿大": "Canada",
-  "波黑": "Bosnia and Herzegovina",
-  "卡塔尔": "Qatar",
-  "瑞士": "Switzerland",
-  "巴西": "Brazil",
-  "摩洛哥": "Morocco",
-  "海地": "Haiti",
-  "苏格兰": "Scotland",
-  "美国": "United States",
-  "巴拉圭": "Paraguay",
-  "澳大利亚": "Australia",
-  "土耳其": "Turkey",
-  "德国": "Germany",
-  "库拉索": "Curacao",
-  "科特迪瓦": "Ivory Coast",
-  "厄瓜多尔": "Ecuador",
-  "荷兰": "Netherlands",
-  "日本": "Japan",
-  "瑞典": "Sweden",
-  "突尼斯": "Tunisia",
-  "比利时": "Belgium",
-  "埃及": "Egypt",
-  "伊朗": "Iran",
-  "新西兰": "New Zealand",
-  "西班牙": "Spain",
-  "佛得角": "Cape Verde",
-  "沙特阿拉伯": "Saudi Arabia",
-  "乌拉圭": "Uruguay",
-  "法国": "France",
-  "塞内加尔": "Senegal",
-  "伊拉克": "Iraq",
-  "挪威": "Norway",
-  "阿根廷": "Argentina",
-  "阿尔及利亚": "Algeria",
-  "奥地利": "Austria",
-  "约旦": "Jordan",
-  "葡萄牙": "Portugal",
-  "刚果民主共和国": "DR Congo",
-  "乌兹别克斯坦": "Uzbekistan",
-  "哥伦比亚": "Colombia",
-  "英格兰": "England",
-  "克罗地亚": "Croatia",
-  "加纳": "Ghana",
-  "巴拿马": "Panama"
-};
 const MARKET_TEXT_ALIASES: Record<string, string[]> = {
   "germany": ["Germany", "GER", "DEU"],
   "curacao": ["Curacao", "Curaçao", "KOR"],
@@ -155,14 +95,13 @@ const MARKET_TEXT_ALIASES: Record<string, string[]> = {
   "australia": ["Australia", "AUS"],
   "turkey": ["Turkey", "TUR"],
   "spain": ["Spain", "ESP", "SPA"],
-  "cape-verde": ["Cape Verde", "Cabo Verde", "CV", "CPV", "CVE"]
+  "cape-verde": ["Cape Verde", "Cabo Verde", "CV", "CVI", "CPV", "CVE"]
 };
+const CODE_TO_TEAM_SLUG = buildCodeToTeamSlugMap();
 
 export async function refreshUpcomingMatches() {
   const limit = parsePositiveInteger(process.env.UPCOMING_MATCH_LIMIT, DEFAULT_UPCOMING_MATCH_LIMIT);
-  const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
-  const polymarketMatches = await fetchUpcomingMatchesFromPolymarket(officialMatches);
-  const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
+  const matches = await fetchUpcomingMatchesFromPolymarketGames(limit);
   const valuations = await getCurrentValuations();
   const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
   const enriched = await refreshUpcomingMatchResearch(
@@ -218,15 +157,15 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
     console.warn("Upcoming match read failed. Falling back to default match card.", error);
   }
 
-  if (!rows.length) {
+  const hasLegacyScheduleRows = rows.some((row) => {
+    const sourceUrl = row.marketSourceUrl ?? "";
+    return sourceUrl && !sourceUrl.includes("polymarket.com");
+  });
+  if (!rows.length || hasLegacyScheduleRows) {
     const valuations = await getCurrentValuations();
     const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
-    const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
-    if (officialMatches.length) {
-      const polymarketMatches = isPolymarketMatchDiscoveryEnabled()
-        ? await fetchUpcomingMatchesFromPolymarket(officialMatches)
-        : [];
-      const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
+    const matches = await fetchUpcomingMatchesFromPolymarketGames(limit);
+    if (matches.length) {
       return enrichMatchesWithPropPrices(
         matches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug))
       );
@@ -278,143 +217,72 @@ async function enrichMatchesWithPropPrices(matches: UpcomingMatch[]) {
   return enriched;
 }
 
-function isPolymarketMatchDiscoveryEnabled() {
-  return (process.env.UPCOMING_MATCH_POLYMARKET_MATCH_ENABLED ?? "true").toLowerCase() !== "false";
-}
-
-async function fetchUpcomingMatchesFromCctv(limit: number): Promise<UpcomingMatch[]> {
-  const base = (process.env.CCTV_SCHEDULE_API_BASE || CCTV_SCHEDULE_BASE).replace(/\/$/, "");
-  const season = process.env.WORLD_CUP_SEASON || "2026";
-  const leagueId = process.env.WORLD_CUP_LEAGUE_ID || "3400";
-  const url = `${base}/game/season_game_list?leagueId=${encodeURIComponent(leagueId)}&season=${encodeURIComponent(season)}&client=pc`;
-
-  try {
-    const data = await fetchJsonWithFallback<unknown>(url, 15_000);
-    const now = new Date();
-    return extractCctvGames(data)
-      .map(cctvGameToUpcomingMatch)
-      .filter((match): match is UpcomingMatch => Boolean(match))
-      .filter((match) => {
-        const startTime = normalizeDate(match.startTime);
-        return Boolean(startTime && startTime >= now);
-      })
-      .sort((a, b) => (normalizeDate(a.startTime)?.getTime() ?? 0) - (normalizeDate(b.startTime)?.getTime() ?? 0))
-      .slice(0, limit);
-  } catch (error) {
-    console.warn("CCTV upcoming match schedule request failed.", error);
-    return [];
-  }
-}
-
-async function fetchUpcomingMatchesFromPolymarket(officialMatches: UpcomingMatch[] = []): Promise<UpcomingMatch[]> {
+async function fetchUpcomingMatchesFromPolymarketGames(limit: number): Promise<UpcomingMatch[]> {
   const base = (process.env.POLYMARKET_API_BASE || POLYMARKET_BASE).replace(/\/$/, "");
-  const slugs = parseList(process.env.UPCOMING_MATCH_SLUGS);
+  try {
+    const html = await fetchTextWithFallback(POLYMARKET_GAMES_PAGE, 15_000);
+    const fromGamesPage = html ? parsePolymarketGamesPage(html, limit) : [];
+    const enriched: UpcomingMatch[] = [];
+    for (const match of fromGamesPage) {
+      const rows = match.marketSlug
+        ? await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(match.marketSlug)}`)
+        : [];
+      enriched.push(parseMatchFromGamma(match.matchSlug, rows, match) ?? match);
+    }
+    if (enriched.length) return enriched.slice(0, limit);
+  } catch (error) {
+    console.warn("Polymarket games page request failed.", error);
+  }
+  return getCuratedUpcomingMatches(limit);
+}
+
+function parsePolymarketGamesPage(html: string, limit: number) {
+  const hrefMatches = [...html.matchAll(/href=["'](?:https:\/\/polymarket\.com)?\/(?:zh\/)?sports\/world-cup\/(fifwc-[^"'?#/]+)["']/gi)];
+  const slugs = hrefMatches.map((match) => match[1]);
   const matches: UpcomingMatch[] = [];
   const seen = new Set<string>();
-
   for (const slug of slugs) {
     if (seen.has(slug)) continue;
     seen.add(slug);
-    const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
-    const parsed = parseMatchFromGamma(slug, rows) ??
-      await fetchPolymarketSportsPageMatch(slug);
+    const parsed = matchFromPolymarketSlug(slug);
     if (parsed) matches.push(parsed);
+    if (matches.length >= limit) break;
   }
-
-  for (const official of officialMatches) {
-    if (matches.some((match) => isSameFixture(match, official))) continue;
-    for (const slug of buildPolymarketSlugCandidates(official)) {
-      if (seen.has(slug)) continue;
-      seen.add(slug);
-      const rows = await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(slug)}`);
-      const parsed = parseMatchFromGamma(slug, rows, official) ??
-        await fetchPolymarketSportsPageMatch(slug, official);
-      if (parsed) {
-        matches.push(parsed);
-        break;
-      }
-    }
-    if (matches.some((match) => isSameFixture(match, official))) continue;
-    const searched = await fetchPolymarketMatchBySearch(base, official);
-    if (searched) matches.push(searched);
-  }
-
   return matches;
 }
 
-function extractCctvGames(data: unknown): CctvGame[] {
-  if (typeof data !== "object" || data === null) return [];
-  const payload = data as Record<string, unknown>;
-  if (Array.isArray(payload.results)) return payload.results as CctvGame[];
-  if (Array.isArray(payload.data)) return payload.data as CctvGame[];
-  const nested = payload.data && typeof payload.data === "object" ? payload.data as Record<string, unknown> : {};
-  if (Array.isArray(nested.results)) return nested.results as CctvGame[];
-  if (Array.isArray(nested.list)) return nested.list as CctvGame[];
-  return [];
-}
-
-function cctvGameToUpcomingMatch(game: CctvGame): UpcomingMatch | null {
-  const homeTeam = canonicalCctvTeamName(game.homeName);
-  const awayTeam = canonicalCctvTeamName(game.guestName);
-  const startTime = parseCctvDate(game.startTime);
-  if (!homeTeam || !awayTeam || !startTime) return null;
-
-  const homeSeed = findSeedTeamByName(homeTeam) ?? findSeedTeamInText(homeTeam);
-  const awaySeed = findSeedTeamByName(awayTeam) ?? findSeedTeamInText(awayTeam);
-  const matchSlug = `cctv-${game.id ?? `${teamSlugFromName(homeTeam)}-${teamSlugFromName(awayTeam)}-${startTime.toISOString().slice(0, 10)}`}`;
-  const round = game.roundType ? ` / ${game.roundType}` : "";
+function matchFromPolymarketSlug(slug: string): UpcomingMatch | null {
+  const parts = slug.match(/^fifwc-([a-z0-9]+)-([a-z0-9]+)-(\d{4}-\d{2}-\d{2})$/i);
+  if (!parts) return null;
+  const homeTeamSlug = CODE_TO_TEAM_SLUG[parts[1].toLowerCase()];
+  const awayTeamSlug = CODE_TO_TEAM_SLUG[parts[2].toLowerCase()];
+  if (!homeTeamSlug || !awayTeamSlug) return null;
+  const homeSeed = findSeedTeamByName(titleizeSlug(homeTeamSlug)) ?? findSeedTeamInText(titleizeSlug(homeTeamSlug));
+  const awaySeed = findSeedTeamByName(titleizeSlug(awayTeamSlug)) ?? findSeedTeamInText(titleizeSlug(awayTeamSlug));
+  const homeTeam = homeSeed?.name ?? titleizeSlug(homeTeamSlug);
+  const awayTeam = awaySeed?.name ?? titleizeSlug(awayTeamSlug);
 
   return {
-    matchSlug,
-    marketSlug: null,
-    marketTitle: `${homeSeed?.name ?? homeTeam} vs ${awaySeed?.name ?? awayTeam}${round}`,
-    homeTeam: homeSeed?.name ?? homeTeam,
-    awayTeam: awaySeed?.name ?? awayTeam,
-    homeTeamSlug: homeSeed?.slug ?? teamSlugFromName(homeTeam),
-    awayTeamSlug: awaySeed?.slug ?? teamSlugFromName(awayTeam),
-    startTime,
+    matchSlug: slug,
+    marketSlug: slug,
+    marketTitle: `${homeTeam} vs ${awayTeam}`,
+    homeTeam,
+    awayTeam,
+    homeTeamSlug,
+    awayTeamSlug,
+    startTime: new Date(`${parts[3]}T12:00:00Z`),
     llmAdjustment: 0,
-    marketSourceUrl: CCTV_SCHEDULE_PAGE,
+    marketSourceUrl: `https://polymarket.com/zh/sports/world-cup/${slug}`,
     updatedAt: new Date()
   };
 }
 
-function canonicalCctvTeamName(value: unknown) {
-  if (typeof value !== "string") return "";
-  const trimmed = value.trim();
-  return CCTV_TEAM_NAME_MAP[trimmed] ?? trimmed;
-}
-
-function parseCctvDate(value: unknown) {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().replace(" ", "T");
-  const date = new Date(`${normalized}+08:00`);
-  return Number.isNaN(date.getTime()) ? undefined : date;
-}
-
-function mergePolymarketMatch(official: UpcomingMatch, polymarketMatches: UpcomingMatch[]) {
-  const polymarket = polymarketMatches.find((match) =>
-    match.homeTeamSlug === official.homeTeamSlug &&
-    match.awayTeamSlug === official.awayTeamSlug
-  );
-  const curatedMarketUrl = getCuratedSportsMarketUrl(official);
-  const curatedMarketSlug = getCuratedSportsMarketSlug(official);
-  if (!polymarket) {
-    return {
-      ...official,
-      marketSlug: official.marketSlug ?? curatedMarketSlug,
-      marketSourceUrl: curatedMarketUrl ?? official.marketSourceUrl
-    };
-  }
-
-  return {
-    ...official,
-    marketSlug: polymarket.marketSlug ?? curatedMarketSlug,
-    homeProbability: polymarket.homeProbability,
-    drawProbability: polymarket.drawProbability,
-    awayProbability: polymarket.awayProbability,
-    marketSourceUrl: polymarket.marketSourceUrl ?? curatedMarketUrl ?? official.marketSourceUrl
-  };
+function getCuratedUpcomingMatches(limit: number) {
+  return [
+    matchFromPolymarketSlug("fifwc-esp-cvi-2026-06-15"),
+    matchFromPolymarketSlug("fifwc-bel-egy-2026-06-15"),
+    matchFromPolymarketSlug("fifwc-sau-uru-2026-06-15")
+  ].filter((match): match is UpcomingMatch => Boolean(match)).slice(0, limit);
 }
 
 async function fetchGammaRows(url: string) {
@@ -432,41 +300,6 @@ async function fetchGammaRows(url: string) {
   } catch (error) {
     console.warn(`Upcoming match Gamma request failed for ${url}`, error);
     return [];
-  }
-}
-
-async function fetchPolymarketMatchBySearch(base: string, official: UpcomingMatch) {
-  const queries = [
-    `${official.homeTeam} ${official.awayTeam}`,
-    `${official.homeTeam} vs ${official.awayTeam}`,
-    `${official.homeTeam} ${official.awayTeam} World Cup`,
-    ...buildAliasSearchQueries(official)
-  ];
-  for (const query of queries) {
-    const params = new URLSearchParams({
-      active: "true",
-      closed: "false",
-      limit: "25",
-      search: query
-    });
-    const rows = await fetchGammaRows(`${base}/events?${params.toString()}`);
-    const parsed = parseMatchFromGamma(`search-${teamSlugFromName(official.homeTeam)}-${teamSlugFromName(official.awayTeam)}`, rows, official);
-    if (parsed) return parsed;
-  }
-  return null;
-}
-
-async function fetchPolymarketSportsPageMatch(slug: string, expected?: UpcomingMatch) {
-  const url = `https://polymarket.com/sports/world-cup/${slug}`;
-  try {
-    const html = await fetchTextWithFallback(url, 12_000);
-    if (!html) return null;
-    return parseSportsPageMatch(slug, url, html, expected);
-  } catch (error) {
-    if (process.env.CUPEDGE_POLYMARKET_DEBUG === "1") {
-      console.warn(`Polymarket sports page fetch failed for ${url}`, error);
-    }
-    return null;
   }
 }
 
@@ -664,19 +497,6 @@ function buildMatchResearchQueries(match: UpcomingMatch) {
     `${match.homeTeam} ${match.awayTeam} coach press conference tactics form World Cup -watch -stream -tv`,
     `${fixture} weather venue pitch travel rest advantage World Cup -watch -stream -tv`
   ];
-}
-
-function buildAliasSearchQueries(match: UpcomingMatch) {
-  const homeAliases = MARKET_TEXT_ALIASES[match.homeTeamSlug ?? ""] ?? [];
-  const awayAliases = MARKET_TEXT_ALIASES[match.awayTeamSlug ?? ""] ?? [];
-  const queries: string[] = [];
-  for (const home of homeAliases.slice(0, 3)) {
-    for (const away of awayAliases.slice(0, 3)) {
-      queries.push(`${home} ${away} World Cup`);
-      queries.push(`${home} vs ${away}`);
-    }
-  }
-  return [...new Set(queries)];
 }
 
 function isBettingRelevantSearchResult(result: TavilySearchResult) {
@@ -952,81 +772,6 @@ function hasMoneylinePrices(probabilities: { home?: number; draw?: number; away?
     probabilities.away !== undefined;
 }
 
-function parseSportsPageMatch(slug: string, url: string, html: string, expected?: UpcomingMatch): UpcomingMatch | null {
-  if (!expected) return null;
-  const text = htmlToText(html);
-  if (!textLooksLikeFixture({ title: text, slug }, expected)) return null;
-  const home = findSportsPageTeamPrice(text, expected.homeTeam, expected.homeTeamSlug ?? teamSlugFromName(expected.homeTeam));
-  const away = findSportsPageTeamPrice(text, expected.awayTeam, expected.awayTeamSlug ?? teamSlugFromName(expected.awayTeam));
-  const draw = findSportsPageDrawPrice(text);
-  const inferredDraw = home !== undefined && away !== undefined ? clampProbability(1 - home - away) : undefined;
-  const drawProbability = draw ?? (inferredDraw && inferredDraw > 0.005 ? inferredDraw : undefined);
-  if (home === undefined || away === undefined || drawProbability === undefined) return null;
-
-  return {
-    matchSlug: slug,
-    marketSlug: slug,
-    marketTitle: `${expected.homeTeam} vs ${expected.awayTeam}`,
-    homeTeam: expected.homeTeam,
-    awayTeam: expected.awayTeam,
-    homeTeamSlug: expected.homeTeamSlug,
-    awayTeamSlug: expected.awayTeamSlug,
-    startTime: expected.startTime,
-    homeProbability: home,
-    drawProbability,
-    awayProbability: away,
-    llmAdjustment: 0,
-    marketSourceUrl: url,
-    updatedAt: new Date()
-  };
-}
-
-function findSportsPageTeamPrice(text: string, teamName: string, teamSlug: string) {
-  const folded = foldText(text);
-  const aliases = [
-    teamName,
-    ...(MARKET_TEXT_ALIASES[teamSlug] ?? []),
-    ...(MARKET_SLUG_CODES[teamSlug] ?? []).map((code) => code.toUpperCase())
-  ].map(foldText);
-
-  for (const alias of aliases) {
-    const escaped = escapeRegex(alias);
-    const patterns = [
-      new RegExp(`${escaped}\\s+(?:is\\s+currently\\s+)?(?:priced\\s+)?at\\s+(\\d+(?:\\.\\d+)?)\\s*(?:¢|c|%)`, "i"),
-      new RegExp(`\\b${escaped}\\s+(\\d+(?:\\.\\d+)?)\\s*(?:¢|c|%)`, "i"),
-      new RegExp(`will\\s+${escaped}\\s+win[^?]*\\?\\s*yes\\s*(\\d+(?:\\.\\d+)?)\\s*%`, "i")
-    ];
-    for (const pattern of patterns) {
-      const matched = folded.match(pattern);
-      const parsed = parsePercentLike(matched?.[1]);
-      if (parsed !== undefined) return parsed;
-    }
-  }
-  return undefined;
-}
-
-function findSportsPageDrawPrice(text: string) {
-  const folded = foldText(text);
-  const patterns = [
-    /\bdraw\s+(\d+(?:\.\d+)?)\s*(?:¢|c|%)/i,
-    /end\s+in\s+a\s+draw[^?]*\?\s*yes\s*(\d+(?:\.\d+)?)\s*%/i,
-    /draw[^.]{0,80}?at\s+(\d+(?:\.\d+)?)\s*(?:¢|c|%)/i
-  ];
-  for (const pattern of patterns) {
-    const matched = folded.match(pattern);
-    const parsed = parsePercentLike(matched?.[1]);
-    if (parsed !== undefined) return parsed;
-  }
-  return undefined;
-}
-
-function parsePercentLike(value: string | undefined) {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return undefined;
-  return clampProbability(parsed > 1 ? parsed / 100 : parsed);
-}
-
 function textLooksLikeFixture(source: GammaRow, expected: UpcomingMatch) {
   const text = foldText([
     source.question,
@@ -1048,52 +793,6 @@ function textLooksLikeFixture(source: GammaRow, expected: UpcomingMatch) {
   return hasHome && hasAway;
 }
 
-function buildPolymarketSlugCandidates(match: UpcomingMatch) {
-  const homeSlug = match.homeTeamSlug ?? teamSlugFromName(match.homeTeam);
-  const awaySlug = match.awayTeamSlug ?? teamSlugFromName(match.awayTeam);
-  const homeCodes = MARKET_SLUG_CODES[homeSlug] ?? [homeSlug.slice(0, 3)];
-  const awayCodes = MARKET_SLUG_CODES[awaySlug] ?? [awaySlug.slice(0, 3)];
-  const dates = getPolymarketDateCandidates(match.startTime);
-  const slugs = new Set<string>();
-  for (const date of dates) {
-    for (const homeCode of homeCodes) {
-      for (const awayCode of awayCodes) {
-        slugs.add(`fifwc-${homeCode}-${awayCode}-${date}`);
-        slugs.add(`fifwc-${awayCode}-${homeCode}-${date}`);
-      }
-    }
-  }
-  return [...slugs];
-}
-
-function getPolymarketDateCandidates(value: Date | string | null | undefined) {
-  const date = normalizeDate(value);
-  if (!date) return [];
-  const candidates = new Set<string>();
-  candidates.add(date.toISOString().slice(0, 10));
-  candidates.add(new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(date));
-  candidates.add(new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(date));
-  return [...candidates];
-}
-
-function isSameFixture(a: UpcomingMatch, b: UpcomingMatch) {
-  const aHome = a.homeTeamSlug ?? teamSlugFromName(a.homeTeam);
-  const aAway = a.awayTeamSlug ?? teamSlugFromName(a.awayTeam);
-  const bHome = b.homeTeamSlug ?? teamSlugFromName(b.homeTeam);
-  const bAway = b.awayTeamSlug ?? teamSlugFromName(b.awayTeam);
-  return aHome === bHome && aAway === bAway;
-}
-
 function parseMaybeJsonArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
@@ -1105,24 +804,21 @@ function parseMaybeJsonArray(value: unknown): unknown[] {
   }
 }
 
-function htmlToText(html: string) {
-  const withMetaContent = html.replace(/<meta[^>]+content=(["'])(.*?)\1[^>]*>/gi, " $2 ");
-  return decodeHtmlEntities(withMetaContent)
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function buildCodeToTeamSlugMap() {
+  const byCode: Record<string, string> = {};
+  for (const [teamSlug, codes] of Object.entries(MARKET_SLUG_CODES)) {
+    for (const code of codes) {
+      byCode[code.toLowerCase()] = teamSlug;
+    }
+  }
+  return byCode;
 }
 
-function decodeHtmlEntities(value: string) {
-  return value
-    .replace(/&quot;/g, "\"")
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+function titleizeSlug(slug: string) {
+  return slug
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function foldText(value: string) {
@@ -1131,10 +827,6 @@ function foldText(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[’‘]/g, "'")
     .toLowerCase();
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseNumber(value: unknown) {
@@ -1176,13 +868,6 @@ function mergeSources(values: Array<string | null | undefined>) {
     }
   }
   return [...sources].slice(0, 8).join("\n") || undefined;
-}
-
-function parseList(value: string | undefined) {
-  return (value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number) {

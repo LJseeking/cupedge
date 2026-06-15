@@ -655,21 +655,13 @@ function buildLiveRawOpportunity({
         ? "low"
       : "medium";
   const yesFair = clampProbability(fair.probability);
-  const yesProbabilityEdge = yesFair - yesPrice;
-  const side: MarketSide =
-    fair.source === "UNMODELED" || fair.source === "MOCK" || yesProbabilityEdge >= 0
-      ? "YES"
-      : "NO";
-  const polymarketProbability = side === "YES" ? yesPrice : clampProbability(1 - yesPrice);
-  const fairProbability = side === "YES" ? yesFair : clampProbability(1 - yesFair);
-
   return {
     marketType,
     marketTitle,
     outcomeName,
-    side,
-    polymarketProbability,
-    fairProbability,
+    side: "YES",
+    polymarketProbability: yesPrice,
+    fairProbability: yesFair,
     liquidity,
     volume24h: volume,
     dataQuality,
@@ -958,6 +950,29 @@ function enrichOpportunity(opportunity: Omit<
 
 function normalizeStoredOpportunity<T extends Parameters<typeof enrichOpportunity>[0]>(opportunity: T): T {
   if (
+    opportunity.priceSource === "LIVE_POLYMARKET" &&
+    opportunity.side === "NO" &&
+    isTeamMarketType(opportunity.marketType)
+  ) {
+    return buildOpportunity({
+      marketType: opportunity.marketType,
+      marketTitle: opportunity.marketTitle,
+      outcomeName: opportunity.outcomeName,
+      side: "YES",
+      polymarketProbability: clampProbability(1 - opportunity.polymarketProbability),
+      fairProbability: clampProbability(1 - opportunity.fairProbability),
+      liquidity: opportunity.liquidity ?? 0,
+      volume24h: opportunity.volume24h ?? 0,
+      dataQuality: opportunity.dataQuality,
+      priceSource: opportunity.priceSource,
+      volumeSource: opportunity.volumeSource,
+      fairValueSource: opportunity.fairValueSource,
+      sourceUrl: opportunity.sourceUrl ?? undefined,
+      marketSourceUrl: opportunity.marketSourceUrl ?? undefined
+    }, normalizeStoredDate(opportunity.updatedAt)) as unknown as T;
+  }
+
+  if (
     ["REACH_R16", "REACH_QF", "REACH_SF"].includes(opportunity.marketType) &&
     opportunity.fairValueSource !== "BOOKMAKER" &&
     opportunity.fairValueSource !== "QUANT_MODEL"
@@ -984,6 +999,11 @@ function normalizeStoredOpportunity<T extends Parameters<typeof enrichOpportunit
     };
   }
   return opportunity;
+}
+
+function normalizeStoredDate(value: Date | string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
 function calculateValueEdge(price: number, fairProbability: number) {

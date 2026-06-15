@@ -208,8 +208,8 @@ async function getTavilyDeepSeekGeminiAdjustments(
   const tavilyKey = process.env.TAVILY_API_KEY;
   const deepseekKey = process.env.DEEPSEEK_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY || process.env.LLM_SUMMARY_API_KEY;
-  if (!tavilyKey || !deepseekKey || !geminiKey) {
-    console.warn("Tavily/DeepSeek/Gemini research pipeline skipped because one or more API keys are missing.");
+  if (!tavilyKey || !deepseekKey) {
+    console.warn("Tavily/DeepSeek research pipeline skipped because Tavily or DeepSeek key is missing.");
     return new Map();
   }
 
@@ -217,6 +217,10 @@ async function getTavilyDeepSeekGeminiAdjustments(
   if (!searchResults.length) return new Map();
 
   const deepseekResearch = await fetchDeepSeekResearch(inputs, searchResults, deepseekKey);
+  if (!geminiKey) {
+    console.warn("Gemini summary key missing. Continuing with DeepSeek-only research.");
+    return buildDeepSeekOnlyAdjustments(deepseekResearch);
+  }
   let geminiAdjustments: LlmProbabilityAdjustment[] = [];
   try {
     geminiAdjustments = await fetchGeminiSummaryAdjustments(

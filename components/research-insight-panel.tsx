@@ -10,14 +10,20 @@ export function ResearchInsightPanel({
   locale: "zh" | "en";
   title?: string;
 }) {
-  const deepseekBody = insight?.deepseekResearch ??
-    (locale === "zh"
+  const deepseekBody = localizedResearchText(
+    insight?.deepseekResearch,
+    locale,
+    locale === "zh"
       ? "等待下一次 update-data：Tavily 搜索后，DeepSeek 会在这里提取球队新闻、伤停、赛果和赛程影响因子。"
-      : "Waiting for the next update-data run: DeepSeek will extract team news, injuries, results, and schedule factors after Tavily search.");
-  const gptBody = insight?.gptSummary ??
-    (locale === "zh"
+      : "Waiting for the next update-data run: DeepSeek will extract team news, injuries, results, and schedule factors after Tavily search."
+  );
+  const gptBody = localizedResearchText(
+    insight?.gptSummary,
+    locale,
+    locale === "zh"
       ? "等待下一次 update-data：Gemini 会在这里总结 DeepSeek 结论，并给出最终概率校准。"
-      : "Waiting for the next update-data run: Gemini will summarize DeepSeek findings and provide the final probability calibration.");
+      : "Waiting for the next update-data run: Gemini will summarize DeepSeek findings and provide the final probability calibration."
+  );
 
   return (
     <section className="mt-6 rounded-lg border border-line bg-panel p-5">
@@ -55,6 +61,33 @@ export function ResearchInsightPanel({
       </div>
     </section>
   );
+}
+
+function localizedResearchText(value: string | null | undefined, locale: "zh" | "en", fallback: string) {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  const localized = locale === "zh" ? extractChineseSection(trimmed) : extractEnglishSection(trimmed);
+  if (localized) return localized;
+  if (locale === "zh" && looksMostlyEnglish(trimmed)) {
+    return "这条研究仍是旧版英文数据。重新运行 update-data 后，会按当前语言显示中文研究结果。";
+  }
+  return trimmed;
+}
+
+function extractChineseSection(value: string) {
+  const match = value.match(/中文[:：]\s*([\s\S]*?)(?:English\s*:|$)/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractEnglishSection(value: string) {
+  const match = value.match(/English\s*:\s*([\s\S]*)/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function looksMostlyEnglish(value: string) {
+  const chineseCount = (value.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const latinCount = (value.match(/[a-z]/gi) ?? []).length;
+  return latinCount > 40 && chineseCount < 8;
 }
 
 function ResearchBlock({

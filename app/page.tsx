@@ -358,11 +358,11 @@ function UpcomingMatchCard({
             </div>
             <details className="border-t border-line px-3 py-2 text-xs text-zinc-500">
               <summary className="cursor-pointer select-none font-mono text-zinc-400">
-                {locale === "zh" ? "展开完整中英研究" : "Show full bilingual research"}
+                {locale === "zh" ? "展开完整研究" : "Show full research"}
               </summary>
               <div className="mt-3 grid gap-3 leading-5 sm:grid-cols-2">
-                <p className="whitespace-pre-line">{formatBilingualSummary(match.deepseekResearch, "deepseek", locale)}</p>
-                <p className="whitespace-pre-line">{formatBilingualSummary(match.gptSummary, "gemini", locale)}</p>
+                <p className="whitespace-pre-line">{localizedResearchText(match.deepseekResearch, "deepseek", locale)}</p>
+                <p className="whitespace-pre-line">{localizedResearchText(match.gptSummary, "gemini", locale)}</p>
               </div>
             </details>
           </div>
@@ -446,9 +446,17 @@ function compactResearchSummary(
   kind: "deepseek" | "gemini",
   locale: "zh" | "en"
 ) {
+  return trimToSentence(localizedResearchText(value, kind, locale), locale === "zh" ? 96 : 120);
+}
+
+function localizedResearchText(
+  value: string | null | undefined,
+  kind: "deepseek" | "gemini",
+  locale: "zh" | "en"
+) {
   const summary = formatBilingualSummary(value, kind, locale);
   const localized = locale === "zh" ? extractChineseSection(summary) : extractEnglishSection(summary);
-  return trimToSentence(localized || summary, locale === "zh" ? 96 : 120);
+  return localized || summary;
 }
 
 function extractChineseSection(value: string) {

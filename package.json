@@ -15,6 +15,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "update:site": "node --import tsx scripts/update-data.ts",
+    "update:home": "node --import tsx scripts/update-home.ts",
     "update:data": "node --import tsx scripts/update-data.ts",
     "update:ratings": "node --import tsx scripts/update-ratings.ts",
     "probe:polymarket": "node --import tsx scripts/probe-polymarket.ts"

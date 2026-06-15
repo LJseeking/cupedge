@@ -59,7 +59,9 @@ npm run db:push:prod  # sync PostgreSQL production schema
 npm run db:migrate    # create a Prisma migration
 npm run db:seed       # seed teams, mock valuations, and market opportunities
 npm run db:seed:prod  # seed production PostgreSQL database
-npm run update:data   # run the update job locally
+npm run update:site   # refresh all website data
+npm run update:home   # refresh homepage match pricing, props, and news
+npm run update:data   # legacy alias for update:site
 npm run update:ratings # refresh Elo/SPI ratings only
 npm run update:data -- --mock
 npm run typecheck
@@ -143,7 +145,7 @@ GEMINI_SUMMARY_TIMEOUT_MS="90000"
 
 `POLYMARKET_WORLD_CUP_EVENT_SLUGS` is an optional comma-separated override for extra World Cup event slugs if Polymarket changes the topic page markup.
 
-If live Polymarket market opportunity data cannot be fetched, CupEdge does not pretend stale mock market opportunities are live. Mock opportunities are only used when explicitly running `npm run update:data -- --mock`.
+If live Polymarket market opportunity data cannot be fetched, CupEdge does not pretend stale mock market opportunities are live. Mock opportunities are only used when explicitly running `npm run update:site -- --mock` or `npm run update:data -- --mock`.
 
 Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the scheduled update path. When paused, CupEdge reuses the latest stored Polymarket valuation snapshots and preserves the existing market opportunities instead of requesting Polymarket again.
 
@@ -153,13 +155,13 @@ Set `POLYMARKET_REFRESH_ENABLED="false"` to pause Polymarket refreshes in the sc
 
 `ELO_RATINGS_URL` and `SPI_RATINGS_URL` configure the team strength rating inputs. Elo is the primary national-team strength signal. SPI is optional and only uses the FiveThirtyEight international rankings CSV, not club SPI data. If rating fetches fail, CupEdge uses a local seed fallback, labels the fair source as `Seed Rating Fallback`, and downgrades the signal quality.
 
-`RATINGS_UPDATE_MIN_INTERVAL_HOURS` controls how often ratings are refreshed. Pages never call Elo/SPI sources directly; ratings refresh only during `npm run update:data`, `npm run update:ratings`, or the update job route.
+`RATINGS_UPDATE_MIN_INTERVAL_HOURS` controls how often ratings are refreshed. Pages never call Elo/SPI sources directly; ratings refresh only during `npm run update:site`, `npm run update:data`, `npm run update:ratings`, or the update job route.
 
 `TOURNAMENT_SIMULATIONS` controls the Monte Carlo tournament simulation count. CupEdge uses this quant model as the fair-probability anchor for winner, group winner, reach R16, reach QF, and reach SF markets.
 
-`CCTV_SCHEDULE_API_BASE` configures the official World Cup schedule API used by the homepage upcoming-match panel. It defaults to `https://cbs-u.sports.cctv.com/pc`, the data source behind CCTV's 2026 World Cup schedule page. `UPCOMING_MATCH_LIMIT` defaults to `3`, so the homepage shows the next two to three official fixtures instead of relying on a single Polymarket slug.
+`POLYMARKET_GAMES_PAGE_URL` configures the Polymarket games page used by the homepage upcoming-match panel. It defaults to `https://polymarket.com/zh/sports/world-cup/games`. `UPCOMING_MATCH_LIMIT` defaults to `3`, so the homepage starts from the next two to three Polymarket-listed fixtures and then enriches them with Gamma market prices, prop prices, fair probabilities, and match news.
 
-`UPCOMING_MATCH_SLUGS` is now optional. Use it only to overlay known Polymarket match-market prices onto the official CCTV schedule. If no matching Polymarket slug is configured, CupEdge still shows the official fixture and its model fair probabilities, but labels market price as unmatched.
+If the Polymarket games page is temporarily unavailable, CupEdge falls back to a small curated set of Polymarket fixture slugs and still tries to enrich them through Gamma before showing fair probabilities only.
 
 `MANUAL_MATCH_RESULTS` lets you force known completed results into the simulation while search catches up. Format: `United States 4-1 Paraguay @ 2026-06-12`. Multiple results can be separated by commas or new lines. `MATCH_RESULTS_JSON` accepts an array of `{ homeTeam, awayTeam, homeScore, awayScore, playedAt }` objects. During each update, CupEdge stores match results first, then reruns the tournament simulation with those known results applied to group standings before simulating remaining fixtures.
 
@@ -204,7 +206,7 @@ curl -X POST "http://localhost:3000/api/jobs/update-data?force=true" \
   -H "Authorization: Bearer change-me"
 ```
 
-Pages never call external data providers directly. They read the latest `TeamValuation` and `BookmakerOdd` records from the database. External calls happen only in `GET/POST /api/jobs/update-data` or `npm run update:data`.
+Pages never call external data providers directly. They read the latest `TeamValuation`, `BookmakerOdd`, and upcoming-match records from the database. External calls happen only in `GET/POST /api/jobs/update-data`, `npm run update:site`, `npm run update:home`, or the legacy `npm run update:data`.
 
 The Odds API free tier has only 500 credits/month. CupEdge MVP controls usage with scheduled updates plus database storage. It does not call external odds APIs during page visits.
 

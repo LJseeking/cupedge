@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CupEdge",
-  description: "Polymarket 世界杯概率错配雷达。"
+  description: "世界杯单场比赛公允概率、市场价格和重要新闻研究台。"
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -24,14 +24,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 CupEdge
               </Link>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-sm text-zinc-400">
-                <Link href="/opportunities" className="transition hover:text-zinc-100">
-                  {t.nav.opportunities}
+                <Link href="/" className="transition hover:text-zinc-100">
+                  {locale === "zh" ? "比赛研究" : "Match Desk"}
                 </Link>
                 <Link href="/markets" className="transition hover:text-zinc-100">
                   {t.nav.markets}
-                </Link>
-                <Link href="/moves" className="transition hover:text-zinc-100">
-                  {t.nav.moves}
                 </Link>
                 <Link href="/methodology" className="transition hover:text-zinc-100">
                   {t.nav.methodology}

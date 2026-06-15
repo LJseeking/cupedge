@@ -1,6 +1,7 @@
 import { fetchJsonWithFallback, fetchTextWithFallback } from "@/lib/data/http";
 import { findSeedTeamByName, findSeedTeamInText, teamSlugFromName } from "@/lib/data/teams";
 import { prisma } from "@/lib/db/prisma";
+import { getPolymarketPropPrices } from "@/lib/services/match-prop-prices";
 import { getCurrentValuations } from "@/lib/services/valuation";
 import type { UpcomingMatch } from "@/lib/types/research";
 import { clampProbability } from "@/lib/utils";
@@ -218,11 +219,17 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
     const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
     const officialMatches = await fetchUpcomingMatchesFromCctv(limit);
     if (officialMatches.length) {
-      return officialMatches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug));
+      const polymarketMatches = isPolymarketMatchDiscoveryEnabled()
+        ? await fetchUpcomingMatchesFromPolymarket(officialMatches)
+        : [];
+      const matches = officialMatches.map((match) => mergePolymarketMatch(match, polymarketMatches));
+      return enrichMatchesWithPropPrices(
+        matches.map((match) => enrichMatchFairProbabilities(match, valuationBySlug))
+      );
     }
   }
 
-  return rows.map((row) => ({
+  return enrichMatchesWithPropPrices(rows.map((row) => ({
     id: row.id,
     matchSlug: row.matchSlug,
     marketSlug: row.marketSlug,
@@ -244,7 +251,24 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
     researchSources: row.researchSources,
     marketSourceUrl: row.marketSourceUrl,
     updatedAt: row.updatedAt
-  }));
+  })));
+}
+
+async function enrichMatchesWithPropPrices(matches: UpcomingMatch[]) {
+  if (!matches.length) return matches;
+  const maxMatches = parsePositiveInteger(process.env.UPCOMING_MATCH_PROP_PRICE_LIMIT, 3);
+  const enriched = await Promise.all(
+    matches.map(async (match, index) => {
+      if (index >= maxMatches) return match;
+      const prices = await getPolymarketPropPrices(match);
+      return prices.length ? { ...match, propMarketPrices: prices } : match;
+    })
+  );
+  return enriched;
+}
+
+function isPolymarketMatchDiscoveryEnabled() {
+  return (process.env.UPCOMING_MATCH_POLYMARKET_MATCH_ENABLED ?? "true").toLowerCase() !== "false";
 }
 
 async function fetchUpcomingMatchesFromCctv(limit: number): Promise<UpcomingMatch[]> {

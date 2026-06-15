@@ -39,7 +39,16 @@ export type UpcomingMatch = {
   gptSummary?: string | null;
   researchSources?: string | null;
   marketSourceUrl?: string | null;
+  propMarketPrices?: MatchPropMarketPrice[];
   updatedAt: Date | string;
+};
+
+export type MatchPropMarketPrice = {
+  key: string;
+  label: string;
+  marketProbability: number;
+  sourceUrl?: string | null;
+  provider: "POLYMARKET";
 };
 
 export type MatchResult = {

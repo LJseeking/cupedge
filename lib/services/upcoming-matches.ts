@@ -69,8 +69,8 @@ const MARKET_SLUG_CODES: Record<string, string[]> = {
   "egypt": ["egy"],
   "iran": ["irn"],
   "new-zealand": ["nzl"],
-  "spain": ["esp"],
-  "cape-verde": ["cpv"],
+  "spain": ["esp", "spa"],
+  "cape-verde": ["cpv", "cve", "cv"],
   "saudi-arabia": ["sau"],
   "uruguay": ["ury", "uru"],
   "france": ["fra"],
@@ -148,7 +148,9 @@ const MARKET_TEXT_ALIASES: Record<string, string[]> = {
   "ivory-coast": ["Ivory Coast", "Cote d'Ivoire", "Côte d'Ivoire", "d'Ivoire", "CIV"],
   "ecuador": ["Ecuador", "ECU"],
   "australia": ["Australia", "AUS"],
-  "turkey": ["Turkey", "TUR"]
+  "turkey": ["Turkey", "TUR"],
+  "spain": ["Spain", "ESP", "SPA"],
+  "cape-verde": ["Cape Verde", "Cabo Verde", "CV", "CPV", "CVE"]
 };
 
 export async function refreshUpcomingMatches() {
@@ -394,7 +396,8 @@ async function fetchPolymarketMatchBySearch(base: string, official: UpcomingMatc
   const queries = [
     `${official.homeTeam} ${official.awayTeam}`,
     `${official.homeTeam} vs ${official.awayTeam}`,
-    `${official.homeTeam} ${official.awayTeam} World Cup`
+    `${official.homeTeam} ${official.awayTeam} World Cup`,
+    ...buildAliasSearchQueries(official)
   ];
   for (const query of queries) {
     const params = new URLSearchParams({
@@ -542,7 +545,10 @@ async function refreshUpcomingMatchResearch(matches: UpcomingMatch[]) {
           research = await fetchMatchGeminiSummary(match, searchResults, deepseek, geminiKey);
         } catch (error) {
           console.warn(`Gemini match summary failed for ${match.homeTeam} vs ${match.awayTeam}. Continuing with DeepSeek only.`, error);
+          research = buildGeminiFallbackSummary(match, deepseek);
         }
+      } else {
+        research = buildGeminiFallbackSummary(match, deepseek);
       }
       results.push(applyMatchResearch(match, research));
     } catch (error) {
@@ -614,6 +620,19 @@ function buildMatchResearchQueries(match: UpcomingMatch) {
   ];
 }
 
+function buildAliasSearchQueries(match: UpcomingMatch) {
+  const homeAliases = MARKET_TEXT_ALIASES[match.homeTeamSlug ?? ""] ?? [];
+  const awayAliases = MARKET_TEXT_ALIASES[match.awayTeamSlug ?? ""] ?? [];
+  const queries: string[] = [];
+  for (const home of homeAliases.slice(0, 3)) {
+    for (const away of awayAliases.slice(0, 3)) {
+      queries.push(`${home} ${away} World Cup`);
+      queries.push(`${home} vs ${away}`);
+    }
+  }
+  return [...new Set(queries)];
+}
+
 async function fetchMatchDeepSeekResearch(
   match: UpcomingMatch,
   searchResults: TavilySearchResult[],
@@ -682,6 +701,7 @@ async function fetchMatchGeminiSummary(
     body: JSON.stringify({
       model: process.env.GEMINI_SUMMARY_MODEL || process.env.LLM_SUMMARY_MODEL || "gemini-2.5-flash",
       temperature: 0.1,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
@@ -725,10 +745,39 @@ async function fetchMatchGeminiSummary(
   const payload = safeParseObject(data.choices?.[0]?.message?.content ?? "");
   return {
     deepseekResearch: deepseek.deepseekResearch,
-    gptSummary: typeof payload.gptSummary === "string" ? payload.gptSummary.slice(0, 1400) : undefined,
+    gptSummary: typeof payload.gptSummary === "string"
+      ? payload.gptSummary.slice(0, 1400)
+      : buildGeminiFallbackText(match, deepseek),
     llmAdjustment: boundMatchLlmAdjustment(Number(payload.adjustment ?? 0)),
     researchSources: mergeSources([deepseek.researchSources, stringifySources(payload.sources)])
   };
+}
+
+function buildGeminiFallbackSummary(match: UpcomingMatch, deepseek: MatchResearchPayload): MatchResearchPayload {
+  return {
+    ...deepseek,
+    gptSummary: buildGeminiFallbackText(match, deepseek),
+    llmAdjustment: 0
+  };
+}
+
+function buildGeminiFallbackText(match: UpcomingMatch, deepseek: MatchResearchPayload) {
+  const excerpt = extractFirstResearchSentence(deepseek.deepseekResearch);
+  return [
+    `中文：Gemini 本轮没有返回可解析的总结，因此不做额外概率修正。DeepSeek 已完成 ${match.homeTeam} vs ${match.awayTeam} 的搜索研究；当前保留量化公允概率，并参考 DeepSeek 要点：${excerpt || "暂无足够强的新消息。"}。`,
+    `English: Gemini did not return a parseable summary in this run, so no extra probability adjustment is applied. DeepSeek search research was completed for ${match.homeTeam} vs ${match.awayTeam}; the fair probability remains driven by the quantitative model, with DeepSeek notes considered: ${excerpt || "no sufficiently strong new information."}`
+  ].join("\n");
+}
+
+function extractFirstResearchSentence(value: string | null | undefined) {
+  if (!value) return "";
+  const chinese = value.match(/中文[:：]\s*([\s\S]*?)(?:English\s*:|$)/i)?.[1]?.trim();
+  const source = chinese || value;
+  return source
+    .replace(/\s+/g, " ")
+    .split(/[。.!！?？]/)[0]
+    ?.slice(0, 180)
+    .trim();
 }
 
 function applyMatchResearch(match: UpcomingMatch, research: MatchResearchPayload): UpcomingMatch {
@@ -744,7 +793,7 @@ function applyMatchResearch(match: UpcomingMatch, research: MatchResearchPayload
     fairAwayProbability: total > 0 ? fairAway / total : match.fairAwayProbability,
     llmAdjustment,
     deepseekResearch: research.deepseekResearch ?? match.deepseekResearch,
-    gptSummary: research.gptSummary ?? match.gptSummary,
+    gptSummary: research.gptSummary ?? buildGeminiFallbackText(match, research),
     researchSources: mergeSources([research.researchSources, match.researchSources])
   };
 }
@@ -770,7 +819,7 @@ function parseTeamsFromTitle(title: string, slug: string) {
 function parseMoneylineProbabilities(
   outcomes: string[],
   prices: Array<number | undefined>,
-  teams: { homeTeam: string; awayTeam: string }
+  teams: { homeTeam: string; awayTeam: string; homeTeamSlug?: string; awayTeamSlug?: string }
 ) {
   const byOutcome = new Map<string, number>();
   outcomes.forEach((outcome, index) => {
@@ -778,10 +827,16 @@ function parseMoneylineProbabilities(
     if (price !== undefined && price > 0 && price < 1) byOutcome.set(outcome.toLowerCase(), price);
   });
   return {
-    home: findOutcomePrice(byOutcome, [teams.homeTeam, "home"]),
+    home: findOutcomePrice(byOutcome, outcomeAliases(teams.homeTeam, teams.homeTeamSlug, ["home"])),
     draw: findOutcomePrice(byOutcome, ["draw", "tie"]),
-    away: findOutcomePrice(byOutcome, [teams.awayTeam, "away"])
+    away: findOutcomePrice(byOutcome, outcomeAliases(teams.awayTeam, teams.awayTeamSlug, ["away"]))
   };
+}
+
+function outcomeAliases(teamName: string, teamSlug: string | null | undefined, fallbacks: string[]) {
+  const codes = teamSlug ? MARKET_SLUG_CODES[teamSlug] ?? [] : [];
+  const aliases = teamSlug ? MARKET_TEXT_ALIASES[teamSlug] ?? [] : [];
+  return [teamName, ...aliases, ...codes, ...codes.map((code) => code.toUpperCase()), ...fallbacks];
 }
 
 function findOutcomePrice(outcomes: Map<string, number>, candidates: string[]) {

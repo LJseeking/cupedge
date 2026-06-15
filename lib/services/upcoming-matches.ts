@@ -607,16 +607,19 @@ async function fetchMatchSearchResults(match: UpcomingMatch, apiKey: string): Pr
       results.push(item);
     }
   }
-  return results.slice(0, parsePositiveInteger(process.env.UPCOMING_MATCH_SEARCH_TOTAL_MAX_RESULTS, 10));
+  const bettingRelevant = results.filter(isBettingRelevantSearchResult);
+  const sourcePool = bettingRelevant.length ? bettingRelevant : results;
+  return sourcePool.slice(0, parsePositiveInteger(process.env.UPCOMING_MATCH_SEARCH_TOTAL_MAX_RESULTS, 10));
 }
 
 function buildMatchResearchQueries(match: UpcomingMatch) {
   const date = formatMatchDateForQuery(match.startTime);
   const fixture = `${match.homeTeam} vs ${match.awayTeam}`;
   return [
-    `${fixture} ${date} latest team news injuries lineup World Cup`,
-    `${match.homeTeam} ${match.awayTeam} ${date} preview injury suspension starting lineup`,
-    `${fixture} Polymarket odds latest news`
+    `${fixture} ${date} injury suspension predicted lineup team news -watch -stream -tv`,
+    `${fixture} ${date} odds movement betting preview prediction -watch -stream -tv`,
+    `${match.homeTeam} ${match.awayTeam} coach press conference tactics form World Cup -watch -stream -tv`,
+    `${fixture} weather venue pitch travel rest advantage World Cup -watch -stream -tv`
   ];
 }
 
@@ -631,6 +634,53 @@ function buildAliasSearchQueries(match: UpcomingMatch) {
     }
   }
   return [...new Set(queries)];
+}
+
+function isBettingRelevantSearchResult(result: TavilySearchResult) {
+  const text = [result.title, result.content, result.url].filter(Boolean).join(" ").toLowerCase();
+  const positiveSignals = [
+    "injury",
+    "injuries",
+    "injured",
+    "suspension",
+    "suspended",
+    "lineup",
+    "line-up",
+    "starting xi",
+    "squad",
+    "rotation",
+    "rest",
+    "travel",
+    "weather",
+    "pitch",
+    "tactical",
+    "tactics",
+    "coach",
+    "manager",
+    "press conference",
+    "form",
+    "odds",
+    "betting",
+    "prediction",
+    "preview",
+    "expected goals",
+    "xg"
+  ];
+  const lowValueSignals = [
+    "how to watch",
+    "watch live",
+    "live stream",
+    "streaming",
+    "tv channel",
+    "where to watch",
+    "broadcast",
+    "start time",
+    "kickoff time",
+    "kick-off time"
+  ];
+  const positiveScore = positiveSignals.reduce((score, signal) => score + (text.includes(signal) ? 1 : 0), 0);
+  const lowValueScore = lowValueSignals.reduce((score, signal) => score + (text.includes(signal) ? 1 : 0), 0);
+  return positiveScore > lowValueScore;
 }
 
 async function fetchMatchDeepSeekResearch(
@@ -652,20 +702,26 @@ async function fetchMatchDeepSeekResearch(
         {
           role: "system",
           content:
-            "You extract current football match intelligence from web search snippets. Do not invent facts. Return strict JSON. All display text must include both '中文：' and 'English:' sections."
+            "You extract bet-relevant football match intelligence from web search snippets. Do not invent facts. Ignore broadcast, live-stream, schedule-only, and generic tournament background unless it directly changes match probability. Return strict JSON. All display text must include both '中文：' and 'English:' sections."
         },
         {
           role: "user",
           content: JSON.stringify({
             task:
-              "针对这场具体比赛提取最新赛前信息：伤停、停赛、首发/轮换、近期赛果、赛程动机、天气/场地、盘口或市场变化。只使用给定搜索结果；如果没有可信新消息，请说明已搜索但未找到可靠更新。",
+              "为下注前复核提取这场比赛的增量信息。只关注会影响主胜/平/客胜概率的事实：伤停、停赛、预计首发/轮换、战术匹配、近期状态、赛程/旅行/休息、天气/场地、教练发布会、赔率/盘口变化。不要写比赛时间、球场、电视转播、观看方式或普通赛程信息。只使用给定搜索结果；如果没有下注相关增量信息，明确写“没有发现下注相关增量信息”，并列出缺失的关键类别。",
             match: matchResearchContext(match),
             searchResults: searchResults.map(searchResultForPrompt),
             outputShape: {
               deepseekResearch:
-                "中文：列出这场比赛的最新信息、证据强弱，以及对主胜/平/客胜的方向影响。\nEnglish: Same meaning in English.",
+                "中文：1) 下注相关信息；2) 概率方向影响；3) 证据强弱；4) 不足与不确定性。只保留对下注有用的信息。\nEnglish: Same meaning in English.",
               sources: ["https://example.com/source"]
-            }
+            },
+            rules: [
+              "Do not mention how to watch, TV channel, streaming, kickoff time, or venue unless weather/pitch/travel materially affects probability.",
+              "Coach quote is useful only if it implies tactics, lineup, motivation, rotation, or risk posture.",
+              "If only schedule/broadcast/background sources are available, say there is no bet-relevant incremental information.",
+              "Never turn generic preview text into a probability signal."
+            ]
           })
         }
       ]
@@ -706,20 +762,20 @@ async function fetchMatchGeminiSummary(
         {
           role: "system",
           content:
-            "You are a final match forecasting reviewer. Use search snippets and DeepSeek research to produce a bilingual display summary and a small home-vs-away fair-probability adjustment. Return strict JSON only."
+            "You are a final betting-focused match forecasting reviewer. Use only bet-relevant evidence from search snippets and DeepSeek research to produce a bilingual display summary and a small home-vs-away fair-probability adjustment. Ignore broadcast, schedule-only, and generic preview information. Return strict JSON only."
         },
         {
           role: "user",
           content: JSON.stringify({
             task:
-              "复核这场比赛的最新消息，解释它如何影响公允概率。adjustment 是加到主队胜率、同时从客队胜率扣除的十进制概率；证据弱时必须为 0 或接近 0。",
+              "复核这场比赛的下注相关增量信息，解释它是否足以影响公允概率。adjustment 是加到主队胜率、同时从客队胜率扣除的十进制概率；只有伤停/首发/战术/状态/赔率/天气等强证据才允许非零。普通新闻、观看信息、比赛时间或泛泛预览必须 adjustment=0。",
             maxAdjustment,
             match: matchResearchContext(match),
             deepseekResearch: deepseek.deepseekResearch,
             searchResults: searchResults.map(searchResultForPrompt),
             outputShape: {
               gptSummary:
-                "中文：最新消息摘要、证据强弱、对主胜/平/客胜公允概率的影响。\nEnglish: Same meaning in English.",
+                "中文：下注前结论、可用证据、概率影响、是否值得因为新闻调整公允概率。\nEnglish: Same meaning in English.",
               adjustment: 0,
               reason: "中文：调整原因。\nEnglish: Same meaning in English.",
               sources: ["https://example.com/source"]
@@ -728,6 +784,7 @@ async function fetchMatchGeminiSummary(
               "Do not exceed maxAdjustment in either direction.",
               "Use 0 if there is no strong current evidence.",
               "Do not invent injuries, lineups, or results.",
+              "Do not treat broadcast details, kickoff time, venue, or generic previews as betting evidence.",
               "Return JSON only."
             ]
           })

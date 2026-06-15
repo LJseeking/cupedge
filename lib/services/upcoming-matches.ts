@@ -1,7 +1,11 @@
 import { fetchJsonWithFallback, fetchTextWithFallback } from "@/lib/data/http";
 import { findSeedTeamByName, findSeedTeamInText, teamSlugFromName } from "@/lib/data/teams";
 import { prisma } from "@/lib/db/prisma";
-import { getPolymarketPropPrices } from "@/lib/services/match-prop-prices";
+import {
+  getCuratedSportsMarketSlug,
+  getCuratedSportsMarketUrl,
+  getPolymarketPropPrices
+} from "@/lib/services/match-prop-prices";
 import { getCurrentValuations } from "@/lib/services/valuation";
 import type { UpcomingMatch } from "@/lib/types/research";
 import { clampProbability } from "@/lib/utils";
@@ -259,9 +263,16 @@ async function enrichMatchesWithPropPrices(matches: UpcomingMatch[]) {
   const maxMatches = parsePositiveInteger(process.env.UPCOMING_MATCH_PROP_PRICE_LIMIT, 3);
   const enriched = await Promise.all(
     matches.map(async (match, index) => {
-      if (index >= maxMatches) return match;
-      const prices = await getPolymarketPropPrices(match);
-      return prices.length ? { ...match, propMarketPrices: prices } : match;
+      const curatedMarketUrl = getCuratedSportsMarketUrl(match);
+      const curatedMarketSlug = getCuratedSportsMarketSlug(match);
+      const baseMatch = {
+        ...match,
+        marketSlug: match.marketSlug ?? curatedMarketSlug,
+        marketSourceUrl: curatedMarketUrl ?? match.marketSourceUrl
+      };
+      if (index >= maxMatches) return baseMatch;
+      const prices = await getPolymarketPropPrices(baseMatch);
+      return prices.length ? { ...baseMatch, propMarketPrices: prices } : baseMatch;
     })
   );
   return enriched;
@@ -386,15 +397,23 @@ function mergePolymarketMatch(official: UpcomingMatch, polymarketMatches: Upcomi
     match.homeTeamSlug === official.homeTeamSlug &&
     match.awayTeamSlug === official.awayTeamSlug
   );
-  if (!polymarket) return official;
+  const curatedMarketUrl = getCuratedSportsMarketUrl(official);
+  const curatedMarketSlug = getCuratedSportsMarketSlug(official);
+  if (!polymarket) {
+    return {
+      ...official,
+      marketSlug: official.marketSlug ?? curatedMarketSlug,
+      marketSourceUrl: curatedMarketUrl ?? official.marketSourceUrl
+    };
+  }
 
   return {
     ...official,
-    marketSlug: polymarket.marketSlug,
+    marketSlug: polymarket.marketSlug ?? curatedMarketSlug,
     homeProbability: polymarket.homeProbability,
     drawProbability: polymarket.drawProbability,
     awayProbability: polymarket.awayProbability,
-    marketSourceUrl: polymarket.marketSourceUrl ?? official.marketSourceUrl
+    marketSourceUrl: polymarket.marketSourceUrl ?? curatedMarketUrl ?? official.marketSourceUrl
   };
 }
 

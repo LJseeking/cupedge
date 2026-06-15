@@ -24,13 +24,41 @@ const TEAM_CODES: Record<string, string[]> = {
   "japan": ["jpn"],
   "uruguay": ["uru", "ury"]
 };
+const CURATED_PROP_PRICE_SETS: Array<{
+  homeTeamSlug: string;
+  awayTeamSlug: string;
+  slug: string;
+  sourceUrl: string;
+  prices: Array<{ key: string; label: string; marketProbability: number }>;
+}> = [
+  {
+    homeTeamSlug: "spain",
+    awayTeamSlug: "cape-verde",
+    slug: "fifwc-esp-cvi-2026-06-15",
+    sourceUrl: "https://polymarket.com/zh/sports/world-cup/fifwc-esp-cvi-2026-06-15",
+    prices: [
+      { key: "moneyline-home", label: "Spain", marketProbability: 0.91 },
+      { key: "moneyline-draw", label: "Draw", marketProbability: 0.066 },
+      { key: "moneyline-away", label: "Cabo Verde", marketProbability: 0.035 },
+      { key: "spread-home-2.5", label: "Spain -2.5", marketProbability: 0.51 },
+      { key: "spread-away-2.5", label: "Cabo Verde +2.5", marketProbability: 0.50 },
+      { key: "total-over-3.5", label: "Over 3.5", marketProbability: 0.49 },
+      { key: "total-under-3.5", label: "Under 3.5", marketProbability: 0.52 },
+      { key: "total-over-4.5", label: "Over 4.5", marketProbability: 0.31 },
+      { key: "total-over-5.5", label: "Over 5.5", marketProbability: 0.19 },
+      { key: "both-teams-score-yes", label: "Both teams to score", marketProbability: 0.34 },
+      { key: "underdog-under-0.5", label: "Cabo Verde under 0.5 goals", marketProbability: 0.67 }
+    ]
+  }
+];
 
 export async function getPolymarketPropPrices(match: UpcomingMatch): Promise<MatchPropMarketPrice[]> {
   const overridePrices = getOverridePropPrices(match);
   if (overridePrices.length) return overridePrices;
 
+  const curatedPrices = getCuratedPropPrices(match);
   const slug = polymarketEventSlug(match);
-  if (!slug) return [];
+  if (!slug) return curatedPrices;
 
   const [gammaPrices, pagePrices] = await Promise.allSettled([
     fetchGammaPropPrices(slug, match),
@@ -39,8 +67,33 @@ export async function getPolymarketPropPrices(match: UpcomingMatch): Promise<Mat
 
   return dedupePropPrices([
     ...(gammaPrices.status === "fulfilled" ? gammaPrices.value : []),
-    ...(pagePrices.status === "fulfilled" ? pagePrices.value : [])
+    ...(pagePrices.status === "fulfilled" ? pagePrices.value : []),
+    ...curatedPrices
   ]);
+}
+
+export function getCuratedSportsMarketUrl(match: Pick<UpcomingMatch, "homeTeamSlug" | "awayTeamSlug" | "homeTeam" | "awayTeam">) {
+  return getCuratedPropSet(match)?.sourceUrl ?? null;
+}
+
+export function getCuratedSportsMarketSlug(match: Pick<UpcomingMatch, "homeTeamSlug" | "awayTeamSlug" | "homeTeam" | "awayTeam">) {
+  return getCuratedPropSet(match)?.slug ?? null;
+}
+
+function getCuratedPropPrices(match: UpcomingMatch): MatchPropMarketPrice[] {
+  const set = getCuratedPropSet(match);
+  if (!set) return [];
+  return set.prices.map((price) => ({
+    ...price,
+    provider: "POLYMARKET" as const,
+    sourceUrl: set.sourceUrl
+  }));
+}
+
+function getCuratedPropSet(match: Pick<UpcomingMatch, "homeTeamSlug" | "awayTeamSlug" | "homeTeam" | "awayTeam">) {
+  const homeSlug = match.homeTeamSlug ?? foldText(match.homeTeam).replace(/\s+/g, "-");
+  const awaySlug = match.awayTeamSlug ?? foldText(match.awayTeam).replace(/\s+/g, "-");
+  return CURATED_PROP_PRICE_SETS.find((set) => set.homeTeamSlug === homeSlug && set.awayTeamSlug === awaySlug) ?? null;
 }
 
 function getOverridePropPrices(match: UpcomingMatch) {

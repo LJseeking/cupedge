@@ -255,7 +255,7 @@ function MarketRow({
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-zinc-500">
         {market.marketProbability === null || market.marketProbability === undefined
-          ? locale === "zh" ? "仅公允" : "fair only"
+          ? locale === "zh" ? "无市场价" : "no market price"
           : percent(market.marketProbability)}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold text-zinc-100">

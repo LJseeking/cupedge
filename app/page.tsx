@@ -225,7 +225,7 @@ function UpcomingMatchCard({
             <div className="mt-1 text-sm font-semibold text-zinc-100">
               {hasMarketPrices
                 ? locale === "zh" ? "已匹配" : "Matched"
-                : locale === "zh" ? "仅公允" : "Fair only"}
+                : locale === "zh" ? "无市场价" : "No market price"}
             </div>
             <div className="mt-1 truncate text-xs text-zinc-500">
               {hasMarketPrices

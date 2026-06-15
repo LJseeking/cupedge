@@ -161,7 +161,12 @@ export async function getUpcomingMatches(limit = 6): Promise<UpcomingMatch[]> {
     const sourceUrl = row.marketSourceUrl ?? "";
     return sourceUrl && !sourceUrl.includes("polymarket.com");
   });
-  if (!rows.length || hasLegacyScheduleRows) {
+  const hasMissingMoneylineRows = rows.some((row) => !hasMoneylinePrices({
+    home: row.homeProbability ?? undefined,
+    draw: row.drawProbability ?? undefined,
+    away: row.awayProbability ?? undefined
+  }));
+  if (!rows.length || hasLegacyScheduleRows || hasMissingMoneylineRows) {
     const valuations = await getCurrentValuations();
     const valuationBySlug = new Map(valuations.map((valuation) => [valuation.slug, valuation]));
     const matches = await fetchUpcomingMatchesFromPolymarketGames(limit);
@@ -222,18 +227,23 @@ async function fetchUpcomingMatchesFromPolymarketGames(limit: number): Promise<U
   try {
     const html = await fetchTextWithFallback(POLYMARKET_GAMES_PAGE, 15_000);
     const fromGamesPage = html ? parsePolymarketGamesPage(html, limit) : [];
-    const enriched: UpcomingMatch[] = [];
-    for (const match of fromGamesPage) {
-      const rows = match.marketSlug
-        ? await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(match.marketSlug)}`)
-        : [];
-      enriched.push(parseMatchFromGamma(match.matchSlug, rows, match) ?? match);
-    }
+    const enriched = await enrichPolymarketMatchesWithGamma(base, fromGamesPage, limit);
     if (enriched.length) return enriched.slice(0, limit);
   } catch (error) {
     console.warn("Polymarket games page request failed.", error);
   }
-  return getCuratedUpcomingMatches(limit);
+  return enrichPolymarketMatchesWithGamma(base, getCuratedUpcomingMatches(limit), limit);
+}
+
+async function enrichPolymarketMatchesWithGamma(base: string, matches: UpcomingMatch[], limit: number) {
+  const enriched: UpcomingMatch[] = [];
+  for (const match of matches.slice(0, limit)) {
+    const rows = match.marketSlug
+      ? await fetchGammaRows(`${base}/events?slug=${encodeURIComponent(match.marketSlug)}`)
+      : [];
+    enriched.push(parseMatchFromGamma(match.matchSlug, rows, match) ?? match);
+  }
+  return enriched;
 }
 
 function parsePolymarketGamesPage(html: string, limit: number) {
